@@ -22,7 +22,7 @@ def get_platform():
 	else:
 		return "unknown"
 
-
+punctuation = ',.?!:;，。？！：；'
 lang_popularity = defaultdict(lambda: 0, {'English': 1132, 'Simplified Chinese': 1117, 'Traditional Chinese': 1116, 'Hindi': 615, 'Spanish': 534, 'French': 280, 'Arabic': 274,
                                           'Bengali': 265, 'Russian': 258, 'Portuguese': 234, 'Indonesian': 199, 'Urdu': 170, 'German': 132, 'Japanese': 128, 'Swahili': 98,
                                           'Punjabi': 93, 'Tamil': 81, 'Turkish': 80, 'Korean': 77, 'Vietnamese': 77, 'Javanese': 68, 'Italian': 68, 'Hausa': 63, 'Thai': 61,
@@ -178,3 +178,8 @@ def set_language(lang):
 def escape_win_filename(fn):
 	return fn.replace('/', '\\').replace('^', '^^').replace('&', '^&').replace('(', '^(').replace(')', '^)').replace('%', '^%')
 
+def asr_postprocess(txt):
+	ret = txt.strip()
+	for c in punctuation:
+		ret = ret.strip(c)
+	return ret

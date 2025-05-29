@@ -846,7 +846,7 @@ def _add_spoken(client_ip, user, getString):
 	elif not asr_output['text']:
 		return logging.error(f'ASR output is empty')
 
-	res = findMedia(K.download_path, asr_output['text'], lang=asr_output['language'])
+	res = findMedia(K.download_path, asr_postprocess(asr_output['text']), lang=asr_output['language'])
 	ws = ip2websock.get(client_ip, '')
 	if not res:
 		return ws.send(f"showNotification('{getString(226)%asr_output['text']}', 'is-info')")
