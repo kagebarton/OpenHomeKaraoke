@@ -1,69 +1,155 @@
+<style>
+  #local-results {
+    display: none;
+    margin-top: 6px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    max-height: 40vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .local-result-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #333;
+    gap: 8px;
+  }
+  .local-result-row:last-child { border-bottom: none; }
+  .local-result-row:active { background: #2a2a2a; }
+  .local-result-name {
+    flex: 1;
+    font-size: 1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .local-result-add {
+    flex-shrink: 0;
+    background: #3273dc;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 14px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .local-result-add:active { background: #2366d1; }
+  #local-results-count {
+    font-size: 0.8rem;
+    color: #888;
+    padding: 4px 12px;
+    border-bottom: 1px solid #333;
+  }
+</style>
 <script>
 var download_url = "";
+var localSearchTimeout;
+
 function download_ended(){
   $("#direct-download-button").removeClass("is-loading");
   $("#download-button").removeClass("is-loading");
 }
-$("#search_result_selector").focus();
-$("#download-button").click(function () {
-  if (!$("#download-button").is('[disabled=disabled]')) {
-    $("#download-button").addClass("is-loading");
+
+function enqueueSong(path, name) {
+  $.post("/enqueue", {song: path, user: currentUser}).then((data) => {
+    var obj = JSON.parse(data);
+    if (obj.success)
+      showNotification("{{getString1(115)}}" + obj.song, "is-success");
+    else
+      showNotification("{{getString1(116)}}" + obj.song, "is-danger");
+    $("#search-box").val("");
+    $("#local-results").hide();
+  });
+}
+
+function runLocalSearch(query) {
+  if (query.length < 2) {
+    $("#local-results").hide();
+    return;
   }
+  $.get('/suggest?q=' + encodeURIComponent(query)).then((data) => {
+    var obj = JSON.parse(data);
+    var keys = Object.keys(obj);
+    var $list = $("#local-results");
+    $list.empty();
+    if (!keys.length) { $list.hide(); return; }
+    $list.append('<div id="local-results-count">' + keys.length + ' {{getString1(114)}}</div>');
+    keys.forEach(function(name) {
+      var path = obj[name];
+      var $row = $('<div class="local-result-row"></div>');
+      var $name = $('<span class="local-result-name"></span>').text(name);
+      var $btn = $('<button class="local-result-add">{{getString1(119)}}</button>');
+      $btn.on('click touchend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        enqueueSong(path, name);
+      });
+      $row.on('click', function() { enqueueSong(path, name); });
+      $row.append($name).append($btn);
+      $list.append($row);
+    });
+    $list.show();
+  });
+}
+
+$("#search_result_selector").focus();
+
+$("#download-button").click(function () {
+  if (!$("#download-button").is('[disabled=disabled]'))
+    $("#download-button").addClass("is-loading");
 });
 
 $("#direct-download-button").click(function () {
-  if (!$("#direct-download-button").is('[disabled=disabled]')) {
+  if (!$("#direct-download-button").is('[disabled=disabled]'))
     $("#direct-download-button").addClass("is-loading");
-  }
 });
 
 $('.download-direct').submit(function(){
-  download_url = $(this).find('[name=song_url]').val()
+  download_url = $(this).find('[name=song_url]').val();
   $.post($(this).attr('action'), $(this).serialize(), function(msg) {
     showNotification(msg);
   }, 'text');
   return false;
 });
 
-//START SELECTIZE CHANGES
-
-//if enter key press, by default search button is click
-$(document).keypress(
-  function (event) {
-    if (event.which == '13') {
-      event.preventDefault();
-
-      if ($(".search-selectize .selectize-input input").val())
-        $('#search-link').trigger("click");
-      else if ($('.search-selectize').find(":selected").text())
-        $('#add-queue-link').trigger("click");
-    }
-  });
-
-$("#add-queue-link").hide();
 $('#search-link').click((e) => {
-  $("#search-link").addClass("is-loading");
-  var search_term = $("#search-box").val();
+  var search_term = $("#search-box").val().trim();
   var include_non_karaoke = $("#search-karaoke").is(":checked");
-  if (search_term)
-    post_switch("/f_search", {search_string:search_term, non_karaoke:include_non_karaoke});
-});
-$('#add-queue-link').click((e) => {
-  $.post("/enqueue", {song: suggests[$('#search-box').val()], user: currentUser}).then((data) => {
-    var obj = JSON.parse(data);
-    if (obj.success)
-      showNotification("{{getString1(115)}}" + obj.song, "is-success")
-    else
-      showNotification("{{getString1(116)}}" + obj.song, "is-danger")
-  });
+  if (search_term) {
+    $("#local-results").hide();
+    $("#search-link").addClass("is-loading");
+    post_switch("/f_search", {search_string: search_term, non_karaoke: include_non_karaoke});
+  }
 });
 
-//END SELECTIZE CHANGES
+$(document).keypress(function(event) {
+  if (event.which == 13) {
+    event.preventDefault();
+    var val = $("#search-box").val().trim();
+    if (val) $('#search-link').trigger("click");
+  }
+});
+
+$(document).on('click touchend', function(e) {
+  if (!$(e.target).closest('#local-results, #search-box, #youtube-thumb').length)
+    $("#local-results").hide();
+});
+
+$('#search-box').on('input', (ev) => {
+  clearTimeout(localSearchTimeout);
+  var query = ev.target.value.trim();
+  localSearchTimeout = setTimeout(function() { runLocalSearch(query); }, 200);
+});
+
+if($("#search-box").val())
+  runLocalSearch($("#search-box").val());
 
 $('#youtube-link').attr('href', $('#search_result_selector').val());
 $('#youtube-link').text($('#search_result_selector').val());
 
-//get youtube thumbnail based on ID
 i = -1;
 changeImage();
 
@@ -73,70 +159,38 @@ $(document).on('change', '#search_result_selector', function () {
   $('#youtube-link').text(url);
   changeImage();
 });
-//allow click of images
 $('#youtube-thumb').click(function (e) { changeImage(); });
 timer = setInterval(function () { $('#youtube-thumb').trigger('click'); }, 2000);
 
-$('#advanced-settings').hide()
+$('#advanced-settings').hide();
 
-// handle show advanced state
 $('#show-advanced').change(() => {
   if ($('#show-advanced').is(":checked"))
-    $('#advanced-settings').show()
+    $('#advanced-settings').show();
   else
-    $('#advanced-settings').hide()
+    $('#advanced-settings').hide();
 });
 
-$(".song-added-by").val(currentUser)
+$(".song-added-by").val(currentUser);
 
 function changeImage() {
   var next = (++i % 4);
   var youtube_id = $('#search_result_selector').find(':selected').data('ytid');
   var fn = (next == 0) ? "default" : next;
-  var img_src = 'https://img.youtube.com/vi/' + youtube_id + '/mq' + fn + '.jpg'
+  var img_src = 'https://img.youtube.com/vi/' + youtube_id + '/mq' + fn + '.jpg';
   $('#youtube-thumb').attr("src", img_src);
 }
-function countChars(s){
-  var sum=0;
-  for(var x=0; x<s.length; x++)
-    sum += s.charCodeAt(x)>127?2:1;
-  return sum;
-}
-var old_text, suggests;
-function set_suggests(obj){
-  suggests = obj;
-  var html = '';
-  for(var i of Object.keys(obj))
-    html += `<option value="${i}">`;
-  $('#suggestions').html(html);
-}
+
 function searchASR(){
   var blob = new Blob(audios, { type: "audio/webm" });
-	const req = new XMLHttpRequest();
-	req.open("POST", '/get_ASR', true);
-  req.onload = (e)=>{
+  const req = new XMLHttpRequest();
+  req.open("POST", '/get_ASR', true);
+  req.onload = (e) => {
     $('#search-box').val(e.target.responseText);
-    $('#search-box').trigger('input');
+    runLocalSearch(e.target.responseText.trim());
     $('#search-box').focus();
   };
-	req.send(blob);
-}
-$('#search-box').on('input', (ev) => {
-  if(ev.target.value!=old_text && countChars(ev.target.value)>=4){
-    old_text = ev.target.value;
-    $.get('/suggest?q='+ev.target.value).then((data) => { set_suggests(JSON.parse(data)); });
-    if(suggests!=null && old_text in suggests){
-      $('#add-queue-link').show();
-      $('#search-link').hide();
-    }else{
-      $('#add-queue-link').hide();
-      $('#search-link').show();
-    }
-  }
-});
-if(old_text){
-  $('#search-box').val(old_text);
-  if(suggests) set_suggests(suggests);
+  req.send(blob);
 }
 </script>
 
@@ -148,16 +202,17 @@ if(old_text){
 <div class="content">
 <div>
   <div class="field" id="container_queue_form">
-    <div id="search-field" class="field has-addons" style="margin-bottom: 5px">
-      <div class="control" style="width:100%">
-        <input class="input" list="suggestions" id="search-box" type="text" value="{{search_string}}" autocomplete="off">
-        <datalist id="suggestions"></datalist>
+    <div id="search-field" style="margin-bottom: 5px">
+      <div class="field has-addons">
+        <div class="control" style="width:100%">
+          <input class="input" id="search-box" type="text" value="{{search_string}}" autocomplete="off">
+        </div>
+        <div class="control">
+          <a class="button is-warning" id="search-link">{{getString1(118)}}</a>
+        </div>
+        <input class="song-added-by" type="hidden" name="song-added-by" />
       </div>
-      <div class="control">
-        <a class="button is-warning" id="search-link">{{getString1(118)}}</a>
-        <a class="button is-info" id="add-queue-link">{{getString1(119)}}</a>
-      </div>
-      <input class="song-added-by" type="hidden" name="song-added-by" />
+      <div id="local-results"></div>
     </div>
     <div class="control has-text-right is-flex" style="justify-content: space-between">
       <label class="checkbox is-size-7">

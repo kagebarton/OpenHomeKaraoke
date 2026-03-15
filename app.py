@@ -521,10 +521,10 @@ def f_search():
 
 @app.route("/autocomplete")
 def autocomplete():
-	q = request.args.get('q').lower()
+	words = request.args.get('q').lower().split()
 	result = []
 	for each in K.available_songs:
-		if q in each.lower():
+		if all(w in each.lower() for w in words):
 			result.append({"path": each, "fileName": K.filename_from_path(each), "type": "autocomplete"})
 	response = app.response_class(
 		response = json.dumps(result),
@@ -535,8 +535,8 @@ def autocomplete():
 
 @app.route("/suggest")
 def suggest():
-	q = request.args.get('q').lower()
-	res = {K.filename_from_path(s):s for s in K.available_songs if q in s.lower()}
+	words = request.args.get('q').lower().split()
+	res = {K.filename_from_path(s):s for s in K.available_songs if all(w in s.lower() for w in words)}
 	return json.dumps(res)
 
 
