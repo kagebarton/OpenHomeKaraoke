@@ -623,9 +623,31 @@ def f_browse():
 def transform_boolean(dct, S):
 	return {k: ((v=='on') if k in S else v) for k, v in dct.items()}
 
+@app.route("/get_subtitle_langs/<video_id>")
+def get_subtitle_langs(video_id):
+	try:
+		url = f"https://www.youtube.com/watch?v={video_id}"
+		info = K.get_yt_dlp_json(url)
+		langs = {}
+		for lang, tracks in (info.get('subtitles') or {}).items():
+			if not lang.startswith('en'):
+				continue
+			name = tracks[0].get('name', lang) if tracks else lang
+			langs[lang] = f"{name} (manual)"
+		for lang, tracks in (info.get('automatic_captions') or {}).items():
+			if not lang.startswith('en'):
+				continue
+			if lang not in langs:
+				name = tracks[0].get('name', lang) if tracks else lang
+				langs[lang] = f"{name} (auto)"
+		return json.dumps(langs)
+	except Exception as e:
+		logging.error(f"Error fetching subtitle langs for {video_id}: {e}")
+		return json.dumps({})
+
 @app.route("/download", methods = ["POST"])
 def download():
-	dct = transform_boolean(request.form.to_dict(), {'enqueue', 'include_subtitles', 'high_quality'})
+	dct = transform_boolean(request.form.to_dict(), {'enqueue', 'high_quality'})
 
 	# download in the background since this can take a few minutes
 	t = threading.Thread(target = K.download_video, kwargs = dct|{'client_ip': request.remote_addr, 'client_lang': request.client_lang})

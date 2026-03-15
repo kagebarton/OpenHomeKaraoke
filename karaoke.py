@@ -461,8 +461,7 @@ class Karaoke:
 			raise e
 
 	def get_yt_dlp_json(self, url):
-		# out_json = subprocess.check_output([self.youtubedl_path, '-j', url])
-		out_json = self.call_yt_dlp(['-j', url], True)
+		out_json = self.call_yt_dlp(['-j', '--remote-components', 'ejs:github', url], True)
 		return json.loads(out_json)
 
 	def get_downloaded_file_basename(self, url):
@@ -484,22 +483,28 @@ class Karaoke:
 		filename = f"{info_json['title']}---{info_json['id']}.{info_json['ext']}"
 		return filename if os.path.isfile(self.download_path+'tmp/'+filename) else None
 
-	def download_video(self, client_lang='', client_ip='', song_url = '', enqueue = False, song_added_by = "Pikaraoke", include_subtitles = False, high_quality = False):
+	def download_video(self, client_lang='', client_ip='', song_url = '', enqueue = False, song_added_by = "Pikaraoke", sub_langs = '', high_quality = False):
 		logging.info("Downloading video: " + song_url)
 		getString2 = lambda ii: os.langs.get(client_lang, os.langs['en_US'])[ii]
 		self.downloading_songs[song_url] = 1
 		dl_path = "%(title)s---%(id)s.%(ext)s"
-		opt_quality = ['-f', 'bestvideo[height<=1080]+bestaudio[abr<=160]'] if high_quality else ['-f', 'mp4+m4a']
-		opt_sub = ['--sub-langs', 'all', '--embed-subs'] if include_subtitles else []
-		cmd = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'mp4'] + self.cookies_opt + opt_quality +\
-		      ["-o", self.download_path+'tmp/'+dl_path] + opt_sub + [song_url]
-		logging.info("Youtube-dl command: " + " ".join(cmd))
-		rc = self.call_yt_dlp(cmd)
-		if rc != 0:
-			logging.error("Error code while downloading, retrying without format options ...")
-			cmd = ["-o", self.download_path + 'tmp/' + dl_path] + opt_sub + [song_url]
-			logging.debug("Youtube-dl command: " + " ".join(cmd))
+		fmt_hq  = 'bestvideo[height<=720][vcodec^=vp9]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio'
+		fmt_std = 'bestvideo[height<=480][vcodec^=vp9]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio'
+		opt_sub = ['--sub-langs', sub_langs, '--embed-subs', '--write-auto-subs', '--convert-subs', 'vtt'] if sub_langs else []
+		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'webm', '--remote-components', 'ejs:github']
+		out_opt = ["-o", self.download_path+'tmp/'+dl_path]
+
+		# Try requested quality first, fall back to standard, then no format constraint
+		attempts = ([fmt_hq, fmt_std] if high_quality else [fmt_std]) + [None]
+		rc = 1
+		for fmt in attempts:
+			opt_quality = ['-f', fmt] if fmt else []
+			cmd = base_opts + self.cookies_opt + opt_quality + out_opt + opt_sub + [song_url]
+			logging.info("Youtube-dl command: " + " ".join(cmd))
 			rc = self.call_yt_dlp(cmd)
+			if rc == 0:
+				break
+			logging.error(f"Download failed with format '{fmt}', trying next fallback ...")
 		if rc == 0:
 			logging.debug("Song successfully downloaded: " + song_url)
 			self.downloading_songs[song_url] = 0
