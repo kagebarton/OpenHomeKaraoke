@@ -256,6 +256,15 @@ def login():
 	return render_template("login.html")
 
 
+@app.route("/f_login")
+def f_login():
+	return render_template(
+		"f_login.html",
+		getString1 = lambda ii: getString1(request.client_lang, ii),
+		admin = is_admin(),
+	)
+
+
 @app.route("/logout")
 def logout():
 	resp = make_response(redirect('/'))
