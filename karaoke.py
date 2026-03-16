@@ -490,8 +490,8 @@ class Karaoke:
 		dl_path = "%(title)s---%(id)s.%(ext)s"
 		fmt_hq  = 'bestvideo[height<=720][vcodec^=vp9]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio'
 		fmt_std = 'bestvideo[height<=480][vcodec^=vp9]+bestaudio[acodec=opus]/bestvideo[height<=480]+bestaudio'
-		opt_sub = ['--sub-langs', sub_langs, '--embed-subs', '--write-auto-subs', '--convert-subs', 'vtt'] if sub_langs else []
-		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'webm', '--remote-components', 'ejs:github']
+		opt_sub = ['--sub-langs', sub_langs, '--embed-subs', '--write-auto-subs', '--write-subs', '--convert-subs', 'vtt'] if sub_langs else []
+		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'webm']
 		out_opt = ["-o", self.download_path+'tmp/'+dl_path]
 
 		# Try requested quality first, fall back to standard, then no format constraint

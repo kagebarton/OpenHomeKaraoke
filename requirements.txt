@@ -47,7 +47,7 @@ soundfile
 demucs
 
 # --- YouTube downloader (dynamically imported in karaoke.py) ---
-yt-dlp
+yt-dlp[default]
 
 # --- Developer only ---
 # translate.py regenerates language files and is not part of the runtime.
