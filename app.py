@@ -1181,7 +1181,7 @@ if __name__ == "__main__":
 	)
 	parser.add_argument(
 		'-c', "--browser-cookies",
-		default = "auto",
+		default = "none",
 		help = "YouTube downloader can use browser cookies from the specified path (see the --cookies-from-browser option of yt-dlp), it can also be auto (default): automatically determine based on OS; none: do not use any browser cookies",
 	)
 	parser.add_argument(
