@@ -476,12 +476,16 @@ class Karaoke:
 				return None
 
 		try:
-			return [i for i in os.listdir(self.download_path+'tmp/') if youtube_id in i][0]
+			return [i for i in os.listdir(self.tmp_dir) if youtube_id in i][0]
 		except:
 			pass
 
-		filename = f"{info_json['title']}---{info_json['id']}.{info_json['ext']}"
-		return filename if os.path.isfile(self.download_path+'tmp/'+filename) else None
+		try:
+			info_json = self.get_yt_dlp_json(url)
+			filename = f"{info_json['title']}---{info_json['id']}.{info_json['ext']}"
+			return filename if os.path.isfile(self.tmp_dir+'/'+filename) else None
+		except:
+			return None
 
 	def download_video(self, client_lang='', client_ip='', song_url = '', enqueue = False, song_added_by = "Pikaraoke", sub_langs = '', high_quality = False):
 		logging.info("Downloading video: " + song_url)
@@ -492,7 +496,7 @@ class Karaoke:
 		fmt_std = 'bestvideo[height<=720][vcodec^=vp9]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio'
 		opt_sub = ['--sub-langs', sub_langs, '--embed-subs', '--write-auto-subs', '--write-subs', '--convert-subs', 'vtt'] if sub_langs else []
 		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'webm']
-		out_opt = ["-o", self.download_path+'tmp/'+dl_path]
+		out_opt = ["-o", self.tmp_dir+'/'+dl_path]
 
 		# Try requested quality first, fall back to standard, then no format constraint
 		attempts = ([fmt_hq, fmt_std] if high_quality else [fmt_std]) + [None]
@@ -510,7 +514,7 @@ class Karaoke:
 			self.downloading_songs[song_url] = 0
 			bn = self.get_downloaded_file_basename(song_url)
 			if bn:
-				shutil.move(self.download_path+'tmp/'+bn, self.download_path+bn)
+				shutil.move(self.tmp_dir+'/'+bn, self.download_path+bn)
 				self.get_available_songs()
 				if enqueue:
 					self.enqueue(self.download_path+bn, song_added_by)
