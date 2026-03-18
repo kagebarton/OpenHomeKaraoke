@@ -66,6 +66,8 @@ class Karaoke:
 	last_vocal_info = 0
 	last_vocal_time = 0
 	use_DNN_vocal = True
+	normalize_vol = False
+	run_vocal = False
 	vocal_process = None
 	vocal_device = None
 	vocal_mode = 'mixed'
@@ -1143,7 +1145,7 @@ class Karaoke:
 				json.dump(self.song2vol, fp, indent=1)
 			return volume_val
 		except:
-			self.normalize_vol = False
+			logging.warning(f"Could not analyse volume for {filename}, skipping normalisation for this song")
 			return 1
 
 	def update_logical_vol(self):

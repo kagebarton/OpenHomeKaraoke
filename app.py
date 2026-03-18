@@ -1085,11 +1085,6 @@ if __name__ == "__main__":
 		default = default_dl_dir,
 	)
 	parser.add_argument(
-		"-sd", "--save-delays",
-		help = f"Filename for saving subtitle/audio/etc. delays for each song, can be: 1. auto(default): if <download-path>/.delays exist, then enable; 2. yes: save; 3. no: do not save; 4. <filename>: specific file for storing the delays",
-		default = 'auto',
-	)
-	parser.add_argument(
 		"-o", "--omxplayer-path",
 		help = f"Path of omxplayer. Only important to raspberry pi hardware. (default: {default_omxplayer_path})",
 		default = default_omxplayer_path,
@@ -1107,11 +1102,6 @@ if __name__ == "__main__":
 	parser.add_argument(
 		"-V", "--run-vocal",
 		help = "Explicitly run vocal-splitter process from the main program (by default, it only run explicitly in Windows)",
-		action = 'store_true',
-	)
-	parser.add_argument(
-		"-nv", "--normalize-vol",
-		help = "Enable volume normalization",
 		action = 'store_true',
 	)
 	parser.add_argument(
@@ -1278,17 +1268,9 @@ if __name__ == "__main__":
 		print(getString(47) + args.dl_path)
 		os.makedirs(args.dl_path)
 
-	# determine whether to save/load delays
-	args.dft_delays_file = args.dl_path+'.delays'
-	if args.save_delays == 'auto':
-		if not os.path.exists(args.dft_delays_file):
-			with open(args.dft_delays_file, 'w') as fp:
-				fp.write('{}')
-		args.save_delays = args.dft_delays_file
-	elif args.save_delays == 'yes':
-		args.save_delays = args.dft_delays_file
-	elif args.save_delays == 'no':
-		args.save_delays = None
+	# save_delays and normalize_vol are managed via the config file (pikaraoke.cfg)
+	args.dft_delays_file = args.dl_path + '.delays'
+	args.save_delays = None
 
 	# Configure karaoke process
 	os.K = K = Karaoke(args)
