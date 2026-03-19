@@ -71,6 +71,9 @@ class Karaoke:
 	vocal_process = None
 	vocal_device = None
 	vocal_mode = 'mixed'
+	vocal_vol = 1.0
+	nonvocal_vol = 1.0
+	ffmpeg_proc = None
 	is_paused = True
 	firstSongStarted = False
 	switchingSong = False
@@ -150,6 +153,8 @@ class Karaoke:
 		if self.use_vlc:
 			self.vlcclient = vlcclient.VLCClient(port = self.vlc_port, path = self.vlc_path,
 			                                     qrcode = (self.qr_code_path if self.show_overlay else None), url = self.url)
+			from lib.ffmpeg_processor import FFmpegProcessor
+			self.ffmpeg_proc = FFmpegProcessor()
 		else:
 			self.omxclient = omxclient.OMXClient(path = self.omxplayer_path, adev = self.omxplayer_adev,
 			                                     dual_screen = self.dual_screen, volume_offset = self.volume_offset)
@@ -630,10 +635,12 @@ class Karaoke:
 	def kill_player(self):
 		if self.use_vlc:
 			logging.debug("Killing old VLC processes")
-			if self.vlcclient != None:
+			if self.vlcclient is not None:
 				self.vlcclient.kill()
-		elif self.omxclient != None:
-				self.omxclient.kill()
+			if self.ffmpeg_proc is not None:
+				self.ffmpeg_proc.stop()
+		elif self.omxclient is not None:
+			self.omxclient.kill()
 
 	def play_file(self, file_path, extra_params = []):
 		self.switchingSong = True
@@ -643,31 +650,50 @@ class Karaoke:
 				self.audio_delay = self.audio_delay if self.audio_delay is not None else saved_delays.get('audio_delay', 0)
 				self.subtitle_delay = saved_delays.get('subtitle_delay', self.default_subtitle_delay)
 				self.show_subtitle = False if self.show_subtitle==False else saved_delays.get('show_subtitle', True)
+
+			# Extract --start-time from extra_params — consumed by FFmpeg, not forwarded to VLC
+			start_time = 0
+			vlc_extra = []
+			for p in extra_params:
+				if p.startswith('--start-time='):
+					start_time = float(p.split('=')[1])
+				else:
+					vlc_extra.append(p)
+
+			nonvocal_path, vocal_path = self._resolve_split_paths(file_path)
+			ffmpeg_params = {
+				'file_path': file_path,
+				'nonvocal_path': nonvocal_path,
+				'vocal_path': vocal_path,
+				'vocal_vol': self.vocal_vol,
+				'nonvocal_vol': self.nonvocal_vol,
+				'semitones': self.now_playing_transpose,
+				'start_time': start_time,
+			}
+			logging.info("Playing via FFmpeg+VLC FIFO pipeline: " + file_path)
+			self.ffmpeg_proc.start(ffmpeg_params)   # starts FFmpeg; blocks on FIFO until VLC connects
+
 			extra_params1 = []
-			logging.info("Playing video in VLC: " + file_path)
 			if self.platform != 'osx':
 				extra_params1 += ['--drawable-hwnd' if self.platform == 'windows' else '--drawable-xid',
 				                  hex(pygame.display.get_wm_info()['window'])]
-			self.now_playing_slave = self.try_set_vocal_mode(self.vocal_mode, file_path)
-			if os.path.isfile(self.now_playing_slave):
-				extra_params1 += [f'--input-slave={self.now_playing_slave}', '--audio-track=1']
 			if self.audio_delay:
 				extra_params1 += [f'--audio-desync={self.audio_delay * 1000}']
 			if self.subtitle_delay:
 				extra_params1 += [f'--sub-delay={self.subtitle_delay * 10}']
 			if self.show_subtitle:
-				extra_params1 += [f'--sub-track=0']
+				extra_params1 += ['--sub-track=0']
 			if self.play_speed != 1:
 				extra_params1 += [f'--rate={self.play_speed}']
+
 			self.now_playing = self.filename_from_path(file_path)
 			self.now_playing_filename = file_path
-			self.is_paused = ('--start-paused' in extra_params1)
+			self.is_paused = ('--start-paused' in vlc_extra)
 			if self.normalize_vol and self.logical_volume is not None:
 				self.volume = self.logical_volume / np.sqrt(self.get_mp3_volume(file_path))
-			if self.now_playing_transpose == 0:
-				xml = self.vlcclient.play_file(file_path, self.volume, extra_params + extra_params1)
-			else:
-				xml = self.vlcclient.play_file_transpose(file_path, self.now_playing_transpose, self.volume, extra_params + extra_params1)
+
+			# VLC reads from the FIFO, not the original file
+			xml = self.vlcclient.play_file(self.ffmpeg_proc.fifo_path, self.volume, vlc_extra + extra_params1)
 			self.has_subtitle = "<info name='Type'>Subtitle</info>" in xml
 			self.has_video = "<info name='Type'>Video</info>" in xml
 			self.volume = round(float(self.vlcclient.get_val_xml(xml, 'volume')))
@@ -805,7 +831,12 @@ class Karaoke:
 	def seek(self, seek_sec):
 		if self.is_file_playing():
 			if self.use_vlc:
-				self.vlcclient.seek(seek_sec)
+				try:
+					posi = float(seek_sec)
+				except (ValueError, TypeError):
+					return False
+				self.play_file(self.now_playing_filename,
+				               [f'--start-time={posi}'] + (['--start-paused'] if self.is_paused else []))
 			else:
 				logging.warning("OMXplayer cannot seek track!")
 			return True
@@ -965,6 +996,52 @@ class Karaoke:
 			logging.warning("Tried to set play speed, but no file is playing!")
 			return False
 
+	def _resolve_split_paths(self, file_path):
+		"""Return (nonvocal_path, vocal_path) as strings; '' if file is absent."""
+		bn = os.path.basename(file_path)
+		prefix = '' if self.use_DNN_vocal else '.'
+		nv = f'{self.download_path}nonvocal/{prefix}{bn}.m4a'
+		v  = f'{self.download_path}vocal/{prefix}{bn}.m4a'
+		return (nv if os.path.isfile(nv) else '', v if os.path.isfile(v) else '')
+
+	def set_vocal_vol(self, vol):
+		try:
+			self.vocal_vol = max(0.0, min(2.0, float(vol)))
+		except (ValueError, TypeError):
+			return False
+		if self.is_file_playing():
+			self._restart_ffmpeg_inplace()
+		self.status_dirty = True
+		return self.vocal_vol
+
+	def set_nonvocal_vol(self, vol):
+		try:
+			self.nonvocal_vol = max(0.0, min(2.0, float(vol)))
+		except (ValueError, TypeError):
+			return False
+		if self.is_file_playing():
+			self._restart_ffmpeg_inplace()
+		self.status_dirty = True
+		return self.nonvocal_vol
+
+	def _restart_ffmpeg_inplace(self):
+		"""Restart only FFmpeg at the current playback position. VLC keeps running."""
+		try:
+			info = self.vlcclient.get_info_xml(self.vlcclient.command().text)
+			posi = info.get('time', 0) or 0
+		except Exception:
+			posi = 0
+		nv, v = self._resolve_split_paths(self.now_playing_filename)
+		self.ffmpeg_proc.start({
+			'file_path': self.now_playing_filename,
+			'nonvocal_path': nv,
+			'vocal_path': v,
+			'vocal_vol': self.vocal_vol,
+			'nonvocal_vol': self.nonvocal_vol,
+			'semitones': self.now_playing_transpose,
+			'start_time': posi,
+		}, recreate_fifo=False)
+
 	def try_set_vocal_mode(self, mode, now_playing_filename):
 		if mode not in ['mixed', 'vocal', 'nonvocal']:
 			mode = {1: 'nonvocal', 2: 'mixed', 3: 'vocal'}[self.get_vocal_mode()]
@@ -980,9 +1057,14 @@ class Karaoke:
 	def play_vocal(self, mode = None, force = False):
 		# mode=vocal/nonvocal/mixed, or else (use current)
 		if self.use_vlc:
-			play_slave = self.try_set_vocal_mode(mode, self.now_playing_filename)
-			if not force and self.now_playing_slave == play_slave:
-				return
+			if mode == 'nonvocal':
+				self.vocal_vol, self.nonvocal_vol = 0.0, 1.0
+			elif mode == 'vocal':
+				self.vocal_vol, self.nonvocal_vol = 1.0, 0.0
+			elif mode == 'mixed':
+				self.vocal_vol, self.nonvocal_vol = 1.0, 1.0
+			if mode:
+				self.vocal_mode = mode
 			status_xml = self.vlcclient.command().text if self.is_paused else self.vlcclient.pause(False).text
 			info = self.vlcclient.get_info_xml(status_xml)
 			posi = info['position']*info['length']
@@ -992,11 +1074,11 @@ class Karaoke:
 			logging.error("Not using VLC. Can't play vocal/nonvocal.")
 
 	def get_vocal_mode(self):
-		if '/nonvocal/' in self.now_playing_slave.replace('\\', '/'):
-			return 1
-		elif '/vocal/' in self.now_playing_slave.replace('\\', '/'):
-			return 3
-		return 2
+		if self.nonvocal_vol > 0.05 and self.vocal_vol < 0.05:
+			return 1   # nonvocal
+		elif self.vocal_vol > 0.05 and self.nonvocal_vol < 0.05:
+			return 3   # vocal
+		return 2       # mixed
 
 	def get_vocal_info(self, force_update=False):
 		tm = time.time()
@@ -1050,6 +1132,8 @@ class Karaoke:
 
 	def stop(self):
 		self.running = False
+		if self.ffmpeg_proc is not None:
+			self.ffmpeg_proc.cleanup()
 
 	def handle_run_loop(self):
 		for event in pygame.event.get():
@@ -1091,6 +1175,8 @@ class Karaoke:
 		self.has_video = True
 		self.last_vocal_info = 0
 		self.play_speed = 1
+		self.vocal_vol = 1.0
+		self.nonvocal_vol = 1.0
 
 	def streamer_alive(self):
 		try:

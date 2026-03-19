@@ -153,6 +153,8 @@ def root():
 		audio_delay = s['audiodelay'],
 		play_speed = s['rate'],
 		vocal_info = K.get_vocal_info(),
+		vocal_vol = K.vocal_vol,
+		nonvocal_vol = K.nonvocal_vol,
 	)
 
 @app.route("/home")
@@ -170,6 +172,8 @@ def home():
 		audio_delay = s['audiodelay'],
 		play_speed = s['rate'],
 		vocal_info = K.get_vocal_info(),
+		vocal_vol = K.vocal_vol,
+		nonvocal_vol = K.nonvocal_vol,
 	)
 @app.route("/f_home")
 def f_home():
@@ -187,6 +191,8 @@ def f_home():
 		audio_delay = s['audiodelay'],
 		play_speed = s['rate'],
 		vocal_info = K.get_vocal_info(),
+		vocal_vol = K.vocal_vol,
+		nonvocal_vol = K.nonvocal_vol,
 	)
 
 
@@ -211,10 +217,12 @@ def nowplaying(return_json=True):
 			"audio_delay": s['audiodelay'],
 			"vol_norm": K.normalize_vol,
 			"play_speed": s['rate'],
-			"vocal_info": K.get_vocal_info()
+			"vocal_info": K.get_vocal_info(),
+		"vocal_vol": K.vocal_vol,
+		"nonvocal_vol": K.nonvocal_vol,
 		}
 		if K.has_subtitle:
-			rc['subtitle_delay'] = s['subtitledelay']
+			rc['subtitle_delay'] = K.subtitle_delay   # sourced from Python state; VLC handles the actual delay
 			rc['show_subtitle'] = K.show_subtitle
 		return json.dumps(rc) if return_json else rc
 	except Exception as e:
@@ -475,6 +483,16 @@ def vol_down():
 @app.route("/vol/<volume>")
 def vol_set(volume):
 	return str(K.vol_set(volume))
+
+
+@app.route("/vocal_vol/<vol>")
+def set_vocal_vol(vol):
+	return json.dumps(K.set_vocal_vol(vol))
+
+
+@app.route("/nonvocal_vol/<vol>")
+def set_nonvocal_vol(vol):
+	return json.dumps(K.set_nonvocal_vol(vol))
 
 
 @app.route("/search", methods = ["GET"])

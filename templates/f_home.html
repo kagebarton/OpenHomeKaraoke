@@ -6,6 +6,8 @@ var audiodelay_typing = false;
 var playspeed_typing = false;
 var subdelay_typing = false;
 var volume_changing = false;
+var vocal_vol_seeking = false;
+var nonvocal_vol_seeking = false;
 var toggleSwitch, seektrack;
 var obj = {};
 function checkMobile() {
@@ -70,7 +72,22 @@ function update(data){
 	s3_enable(3, use_DNN?(obj.vocal_info&2):(obj.vocal_info&8));
 	s3_go_to((obj.vocal_info>>4)&3, false);
 	use_DNN ? $("#pytorch-logo").show():$("#pytorch-logo").hide();
-	
+
+	var hasSplits = use_DNN ? (obj.vocal_info&0x03) : (obj.vocal_info&0x0C);
+	if (hasSplits) {
+		$("#vocal-vol-box").show();
+		if (!vocal_vol_seeking && obj.vocal_vol !== undefined) {
+			$("#vocal-vol").val(Math.round(obj.vocal_vol * 100));
+			$("#vocal-vol-val").text(obj.vocal_vol.toFixed(2));
+		}
+		if (!nonvocal_vol_seeking && obj.nonvocal_vol !== undefined) {
+			$("#nonvocal-vol").val(Math.round(obj.nonvocal_vol * 100));
+			$("#nonvocal-vol-val").text(obj.nonvocal_vol.toFixed(2));
+		}
+	} else {
+		$("#vocal-vol-box").hide();
+	}
+
 	if(obj.vol_norm)
 		$("#vol").addClass('boxedText');
 	else
@@ -78,6 +95,7 @@ function update(data){
 	} else {
 		$("#now-playing").html("{{getString1(69)}}");
 		$(".control-box").hide();
+		$("#vocal-vol-box").hide();
 	}
 
 	if (obj.up_next) {
@@ -167,6 +185,18 @@ seektrack.oninput = () => {$("#seektrack-val").text(getHHMMSS(seektrack.value));
 var speedtrack = document.getElementById("playspeed");
 speedtrack.onchange = () => {$.get("/play_speed/" + speedtrack.value/100);};
 speedtrack.oninput = () => {$("#playspeed-val").text(speedtrack.value/100);};
+
+var vocalVolTrack = document.getElementById("vocal-vol");
+if (vocalVolTrack) {
+	vocalVolTrack.oninput = () => { $("#vocal-vol-val").text((vocalVolTrack.value / 100).toFixed(2)); };
+	$("#vocal-vol").change(() => { $.get("/vocal_vol/" + (vocalVolTrack.value / 100)); });
+}
+
+var nonvocalVolTrack = document.getElementById("nonvocal-vol");
+if (nonvocalVolTrack) {
+	nonvocalVolTrack.oninput = () => { $("#nonvocal-vol-val").text((nonvocalVolTrack.value / 100).toFixed(2)); };
+	$("#nonvocal-vol").change(() => { $.get("/nonvocal_vol/" + (nonvocalVolTrack.value / 100)); });
+}
 
 $("#pause-resume").click(() => {
 	$.get("/pause", function (is_paused) {
@@ -314,6 +344,25 @@ body {
 						<div id="s3t3" style="color:#ffffff" class="legendText" onclick="s3_go_to(3,true)">{{getString1(67)}}</div>
 				</div>
 		</div>
+	</div>
+
+	<div id="vocal-vol-box" style="display:none">
+		<div class="is-flex" style="justify-content: space-between; padding-top: 0.5em">
+			<h4>Vocals: <span id="vocal-vol-val">{{ "%.2f"|format(vocal_vol) }}</span></h4>
+		</div>
+		<input id="vocal-vol" type="range" min="0" max="200"
+			value="{{ (vocal_vol * 100)|int }}"
+			class="transpose-slider" style="width: 100%"
+			onmousedown="vocal_vol_seeking=true"  onmouseup="vocal_vol_seeking=false"
+			ontouchstart="vocal_vol_seeking=true"  ontouchend="vocal_vol_seeking=false"/>
+		<div class="is-flex" style="justify-content: space-between; padding-top: 0.5em">
+			<h4>Music: <span id="nonvocal-vol-val">{{ "%.2f"|format(nonvocal_vol) }}</span></h4>
+		</div>
+		<input id="nonvocal-vol" type="range" min="0" max="200"
+			value="{{ (nonvocal_vol * 100)|int }}"
+			class="transpose-slider" style="width: 100%"
+			onmousedown="nonvocal_vol_seeking=true"  onmouseup="nonvocal_vol_seeking=false"
+			ontouchstart="nonvocal_vol_seeking=true"  ontouchend="nonvocal_vol_seeking=false"/>
 	</div>
 
 	<p class="is-size-3">

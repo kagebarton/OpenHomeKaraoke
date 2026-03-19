@@ -182,38 +182,6 @@ class VLCClient:
 			logging.error("Playing file failed: " + str(e))
 			self.is_transposing = False
 
-	def play_file_transpose(self, file_path, semitones, volume, extra_params = []):
-		# --speex-resampler-quality=<integer [0 .. 10]>
-		#  Resampling quality (0 = worst and fastest, 10 = best and slowest).
-
-		# --src-converter-type={0 (Sinc function (best quality)), 1 (Sinc function (medium quality)),
-		#      2 (Sinc function (fast)), 3 (Zero Order Hold (fastest)), 4 (Linear (fastest))}
-		#  Sample rate converter type
-		#  Different resampling algorithms are supported. The best one is slower, while the fast one exhibits
-		#  low quality.
-
-		if self.platform == "raspberry_pi":
-			# pi sounds bad on hightest quality setting (CPU not sufficient)
-			speex_quality = 10
-			src_type = 1
-		else:
-			speex_quality = 10
-			src_type = 0
-
-		params = [
-			"--audio-filter",
-			"scaletempo_pitch",
-			"--pitch-shift",
-			"%s" % semitones,
-			"--speex-resampler-quality",
-			"%s" % speex_quality,
-#			"--src-converter-type",
-#			"%s" % src_type,
-		]
-
-		logging.debug("Transposing file...")
-		return self.play_file(file_path, volume, params + extra_params)
-
 	def command(self, command = '', save_status=True):
 		try:
 			self.last_status_time = time.time()
