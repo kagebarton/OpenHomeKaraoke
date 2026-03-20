@@ -1,6 +1,7 @@
 import os, sys, re, random, shutil
 import string, logging, time
 import subprocess, zipfile
+import socket
 
 import requests
 
@@ -25,6 +26,18 @@ def get_default_vlc_path(platform):
 		return 'vlc'
 
 
+def is_port_in_use(port):
+	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+		return s.connect_ex(('localhost', port)) == 0
+
+
+def find_available_port(start_port=5002, max_attempts=10):
+	for port in range(start_port, start_port + max_attempts):
+		if not is_port_in_use(port):
+			return port
+	return start_port  # fallback to original port
+
+
 class VLCClient:
 	vol_increment = 10
 
@@ -32,7 +45,10 @@ class VLCClient:
 
 		# HTTP remote control server
 		self.http_password = "".join([random.choice(string.ascii_letters + string.digits) for n in range(32)])
-		self.port = port
+		# Find an available port if the default is in use
+		self.port = find_available_port(port)
+		if self.port != port:
+			logging.warning(f"Port {port} was in use, using port {self.port} instead")
 		self.http_endpoint = "http://localhost:%s/requests/status.xml" % self.port
 		self.http_command_endpoint = self.http_endpoint + "?command="
 		self.is_transposing = False
@@ -140,6 +156,8 @@ class VLCClient:
 					self.process.wait(2)
 				except:
 					self.process.kill()
+					self.process.wait()
+			
 			command = self.cmd_base + params + [file_path]
 			if self.platform == 'osx' and not os.K.full_screen:
 				command.remove('--fullscreen')
@@ -149,18 +167,28 @@ class VLCClient:
 			self.process = subprocess.Popen(command, stdin = subprocess.PIPE)
 
 			# wait for the process to start
+			start_time = time.time()
 			while self.process.poll() is not None:
-				pass
-
-			# wait for VLC HTTP is ready
-			while True:
+				if time.time() - start_time > 5:
+					raise RuntimeError("VLC process exited immediately - check logs for errors")
 				time.sleep(0.1)
-				req = self.command("", False)
-				xml = req.text
-				if "<info name='Type'>Video</info>" not in xml and "<info name='Type'>Audio</info>" not in xml:
+
+			# wait for VLC HTTP is ready (with timeout)
+			http_ready = False
+			for _ in range(50):  # 5 second timeout
+				time.sleep(0.1)
+				try:
+					req = self.command("", False)
+					xml = req.text
+					if req.status_code == 200:
+						if "<info name='Type'>Video</info>" in xml or "<info name='Type'>Audio</info>" in xml:
+							http_ready = True
+							break
+				except:
 					pass
-				elif req.status_code == 200:
-					break
+			
+			if not http_ready:
+				raise RuntimeError("VLC HTTP interface did not become ready in time")
 
 			# workaround --volume-save not working in Windows
 			okay = False

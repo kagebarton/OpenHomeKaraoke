@@ -639,6 +639,14 @@ class Karaoke:
 				self.vlcclient.kill()
 			if self.ffmpeg_proc is not None:
 				self.ffmpeg_proc.stop()
+			# Also kill any stale VLC processes that may be holding ports
+			try:
+				if self.platform == 'windows':
+					os.system('taskkill /F /IM vlc.exe 2>nul')
+				else:
+					os.system('pkill -9 vlc 2>/dev/null')
+			except:
+				pass
 		elif self.omxclient is not None:
 			self.omxclient.kill()
 
@@ -661,6 +669,22 @@ class Karaoke:
 					vlc_extra.append(p)
 
 			nonvocal_path, vocal_path = self._resolve_split_paths(file_path)
+			
+			# Look for external SRT subtitle in "subs" subfolder
+			subtitle_path = None
+			if self.show_subtitle:
+				base, ext = os.path.splitext(file_path)
+				# Remove YouTube ID suffix if present
+				if '---' in base:
+					base = base.split('---')[0]
+				basename = os.path.basename(base)
+				subs_dir = os.path.join(os.path.dirname(file_path), "subs")
+				for sub_ext in ['.srt', '.vtt']:
+					candidate = os.path.join(subs_dir, basename + sub_ext)
+					if os.path.isfile(candidate):
+						subtitle_path = candidate
+						break
+			
 			ffmpeg_params = {
 				'file_path': file_path,
 				'nonvocal_path': nonvocal_path,
@@ -679,10 +703,11 @@ class Karaoke:
 				                  hex(pygame.display.get_wm_info()['window'])]
 			if self.audio_delay:
 				extra_params1 += [f'--audio-desync={self.audio_delay * 1000}']
-			if self.subtitle_delay:
-				extra_params1 += [f'--sub-delay={self.subtitle_delay * 10}']
-			if self.show_subtitle:
-				extra_params1 += ['--sub-track=0']
+			# Subtitles are rendered by VLC from external SRT file
+			if subtitle_path and self.show_subtitle:
+				extra_params1 += [f'--sub-file={subtitle_path}']
+				if self.subtitle_delay:
+					extra_params1 += [f'--sub-delay={self.subtitle_delay * 10}']
 			if self.play_speed != 1:
 				extra_params1 += [f'--rate={self.play_speed}']
 
@@ -694,7 +719,7 @@ class Karaoke:
 
 			# VLC reads from the FIFO, not the original file
 			xml = self.vlcclient.play_file(self.ffmpeg_proc.fifo_path, self.volume, vlc_extra + extra_params1)
-			self.has_subtitle = "<info name='Type'>Subtitle</info>" in xml
+			self.has_subtitle = subtitle_path is not None and self.show_subtitle
 			self.has_video = "<info name='Type'>Video</info>" in xml
 			self.volume = round(float(self.vlcclient.get_val_xml(xml, 'volume')))
 			if self.normalize_vol:
@@ -902,6 +927,7 @@ class Karaoke:
 
 		if self.is_file_playing():
 			if self.use_vlc:
+				# VLC can adjust subtitle delay on the fly
 				self.vlcclient.command(f"subdelay&val={self.subtitle_delay}")
 			else:
 				logging.warning("OMXplayer cannot set subtitle delay!")

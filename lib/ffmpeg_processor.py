@@ -1,10 +1,11 @@
 import os
 import logging
+import shlex
 import subprocess
 import threading
 import time
 
-FIFO_PATH = "/tmp/pikaraoke/ffmpeg_out.mkv"
+FIFO_PATH = "/tmp/pikaraoke/ffmpeg_out.ts"
 
 
 class FFmpegProcessor:
@@ -32,7 +33,8 @@ class FFmpegProcessor:
             if recreate_fifo:
                 self._ensure_fifo()
             cmd = self._build_command(params)
-            logging.info("FFmpeg cmd: " + " ".join(str(x) for x in cmd))
+            # Quote arguments in log for readability when paths contain spaces
+            logging.info("FFmpeg cmd: " + " ".join(shlex.quote(str(x)) for x in cmd))
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -98,25 +100,21 @@ class FFmpegProcessor:
             if start_time > 0:
                 cmd += ["-ss", str(start_time)]
             cmd += ["-i", file_path]
-            cmd += ["-map", "0:v", "-map", "0:a", "-map", "0:s?"]
-            cmd += ["-vcodec", "copy", "-acodec", "copy", "-scodec", "copy"]
-            cmd += ["-f", "matroska", self.fifo_path]
+            cmd += ["-map", "0:v", "-map", "0:a"]
+            cmd += ["-vcodec", "copy", "-acodec", "aac"]
+            cmd += ["-f", "mpegts", self.fifo_path]
             return cmd
 
         cmd = [self.ffmpeg_path, "-y"]
 
-        # Primary input (video + original audio + subtitles)
+        # Primary input (video + original audio)
         if start_time > 0:
             cmd += ["-ss", str(start_time)]
         cmd += ["-i", file_path]
 
-        # Split audio inputs
+        # Split audio inputs (no -ss here since we seek the main input which has the same timeline)
         if has_split:
-            if start_time > 0:
-                cmd += ["-ss", str(start_time)]
             cmd += ["-i", nonvocal_path]
-            if start_time > 0:
-                cmd += ["-ss", str(start_time)]
             cmd += ["-i", vocal_path]
 
         # Build filter_complex
@@ -138,12 +136,13 @@ class FFmpegProcessor:
             )
             audio_label = "a_out"
 
-        cmd += ["-filter_complex", ";".join(filters)]
+        # Join all filters with semicolons and pass as a single argument to -filter_complex
+        filter_str = ";".join(filters)
+        cmd += ["-filter_complex", filter_str]
         cmd += ["-map", "0:v:0"]
         cmd += ["-map", f"[{audio_label}]"]
-        cmd += ["-map", "0:s?"]
+
         cmd += ["-vcodec", "copy"]
-        cmd += ["-acodec", "pcm_s16le"]  # lossless; FIFO is RAM-only so size is irrelevant
-        cmd += ["-scodec", "copy"]
-        cmd += ["-f", "matroska", self.fifo_path]
+        cmd += ["-acodec", "aac"]  # MPEG-TS requires compressed audio (AAC/MP2)
+        cmd += ["-f", "mpegts", self.fifo_path]
         return cmd
