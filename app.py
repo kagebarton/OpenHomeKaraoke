@@ -311,6 +311,13 @@ def set_save_delays(state):
 	return ''
 
 
+@app.route("/default_subtitle_delay/<delay>")
+def set_default_subtitle_delay(delay):
+	K.default_subtitle_delay = float(delay)
+	K.save_config()
+	return ''
+
+
 @app.route("/set_vocal_mode/<mode>")
 def set_vocal_mode(mode):
 	K.set_dnn_vocal(mode.lower() == 'true')
@@ -826,6 +833,7 @@ def info():
 		vocalsplitter = get_status(vocalsplitter) + vocal_extra,
 		platform = K.platform,
 		save_delays = bool(K.save_delays),
+		default_subtitle_delay = K.default_subtitle_delay,
 		admin = is_admin(),
 		admin_enabled = admin_password != None
 	)
@@ -882,6 +890,7 @@ def f_info():
 		vocalsplitter = get_status(vocalsplitter) + vocal_extra,
 		platform = K.platform,
 		save_delays = bool(K.save_delays),
+		default_subtitle_delay = K.default_subtitle_delay,
 		admin = is_admin(),
 		admin_enabled = admin_password != None
 	)

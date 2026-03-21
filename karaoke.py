@@ -1189,6 +1189,10 @@ use_dnn_vocal = {use_dnn_vocal}
 # Save per-song play settings (audio delay, subtitle delay, subtitle on/off).
 # Settings are stored alongside the song library.
 save_play_settings = {save_play_settings}
+
+# Default subtitle delay in seconds (negative = subtitles appear earlier).
+# This is the baseline delay used when no per-song delay is saved.
+default_subtitle_delay = {default_subtitle_delay}
 """
 
 	def load_config(self):
@@ -1205,6 +1209,7 @@ save_play_settings = {save_play_settings}
 			self.use_DNN_vocal = s.getboolean('use_dnn_vocal', fallback=self.use_DNN_vocal)
 			save_play_settings = s.getboolean('save_play_settings', fallback=bool(self.save_delays))
 			self.set_save_delays(save_play_settings)
+			self.default_subtitle_delay = s.getfloat('default_subtitle_delay', fallback=self.default_subtitle_delay)
 		logging.info(f"Config loaded from {self.config_path}")
 
 	def save_config(self):
@@ -1214,6 +1219,7 @@ save_play_settings = {save_play_settings}
 					normalize_vol=str(self.normalize_vol).lower(),
 					use_dnn_vocal=str(self.use_DNN_vocal).lower(),
 					save_play_settings=str(bool(self.save_delays)).lower(),
+					default_subtitle_delay=self.default_subtitle_delay,
 				))
 			logging.info(f"Config saved to {self.config_path}")
 		except Exception as e:
