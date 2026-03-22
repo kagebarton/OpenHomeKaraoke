@@ -161,7 +161,7 @@ function switch_pane(name){
 	var stem = name.split('?')[0];
 	$.get(name, (data)=>{$('#container').html(data);})
 	for(var pn of ['home', 'queue', 'search', 'browse', 'info'])
-		if(stem.endsWith(pn)){$("#"+pn).addClass("is-active"); last_pane = stem;}
+		if(stem.endsWith(pn)){$("#"+pn).addClass("is-active"); last_pane = stem; Cookies.set("last_pane", last_pane);}
 		else $("#"+pn).removeClass("is-active")
 	closeNav();
 }
@@ -295,7 +295,6 @@ function notifyWithControl(message, action, timeout=3000){
 
 function setLanguage(lang, reload){
 	Cookies.set("lang", lang, { expires: 3650 });
-	Cookies.set("last_pane", last_pane);
 	if(reload){
 		window.scrollTo(0, 0);
 		location.reload();

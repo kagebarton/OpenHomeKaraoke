@@ -155,22 +155,6 @@ def root():
 		vocal_info = K.get_vocal_info(),
 	)
 
-@app.route("/home")
-def home():
-	s = K.get_state()
-	return render_template(
-		"home.html",
-		getString1 = lambda ii: getString1(request.client_lang, ii),
-		show_transpose = K.use_vlc,
-		transpose_value = K.now_playing_transpose,
-		volume = s['volume'],
-		admin = is_admin(),
-		seektrack_value = s['time'],
-		seektrack_max = s['length'],
-		audio_delay = s['audiodelay'],
-		play_speed = s['rate'],
-		vocal_info = K.get_vocal_info(),
-	)
 @app.route("/f_home")
 def f_home():
 	ip2pane[request.remote_addr] = 'home'
@@ -257,11 +241,6 @@ def auth():
 	return resp
 
 
-@app.route("/login")
-def login():
-	return render_template("login.html")
-
-
 @app.route("/f_login")
 def f_login():
 	return render_template(
@@ -330,9 +309,6 @@ def norm_vol(mode):
 	return ''
 
 
-@app.route("/queue")
-def queue():
-	return render_template("queue.html", getString1 = lambda ii: getString1(request.client_lang, ii), queue = K.queue, admin = is_admin())
 @app.route("/f_queue")
 def f_queue():
 	ip2pane[request.remote_addr] = 'queue'
@@ -484,25 +460,6 @@ def vol_set(volume):
 	return str(K.vol_set(volume))
 
 
-@app.route("/search", methods = ["GET"])
-def search():
-	if "search_string" in request.args:
-		search_string = request.args["search_string"]
-		search_karaoke = request.args.get('non_karaoke', 'false') == "true"
-		search_results = K.get_search_results(search_string + (" karaoke" if search_karaoke else ""))
-	else:
-		search_string = None
-		search_results = None
-		search_karaoke = False
-	return render_template(
-		"search.html",
-		getString1 = lambda ii: getString1(request.client_lang, ii),
-		songs = K.available_songs,
-		high_quality = K.high_quality,
-		search_results = search_results,
-		search_string = search_string,
-		search_karaoke = search_karaoke
-	)
 @app.route("/f_search", methods = ["GET", "POST"])
 def f_search():
 	ip2pane[request.remote_addr] = 'search'
@@ -585,6 +542,7 @@ def browse():
 		songs = songs[start_index:start_index + results_per_page],
 		admin = is_admin()
 	)
+
 @app.route("/f_browse", methods = ["GET"])
 def f_browse():
 	ip2pane[request.remote_addr] = 'browse'
@@ -837,6 +795,7 @@ def info():
 		admin = is_admin(),
 		admin_enabled = admin_password != None
 	)
+
 @app.route("/f_info")
 def f_info():
 	url = K.url
