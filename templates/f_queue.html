@@ -88,7 +88,7 @@ function generateQueueHTML() {
 }
 
 function clearAll() {
-	if(confirm("{{getString1(108)}}")) $.get("/queue/edit?action=clear");
+	if(confirm("{{getString1(108)}}")) $.get("/queue/edit?action=clear", function(){getQueue()});
 }
 
 //on page load

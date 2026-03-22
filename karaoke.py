@@ -774,7 +774,6 @@ class Karaoke:
 		logging.info("Clearing queue!")
 		self.queue = []
 		self.update_queue()
-		self.skip()
 
 	def queue_edit(self, song_file, action, **kwargs):
 		if action == "move":

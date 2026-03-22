@@ -337,7 +337,7 @@ def queue_edit():
 	if action == "clear":
 		K.queue_clear()
 		flash(getString(6), "is-warning")
-		return redirect(url_for("queue"))
+		return redirect(url_for("f_queue"))
 	elif action == "move":
 		try:
 			id_from = request.args['from']
@@ -372,7 +372,7 @@ def queue_edit():
 				flash(getString(14) + song, "is-success")
 			else:
 				flash(getString(15) + song, "is-danger")
-	return redirect(url_for("queue"))
+	return redirect(url_for("f_queue"))
 
 
 @app.route("/enqueue", methods = ["POST", "GET"])
@@ -442,7 +442,7 @@ def toggle_subtitle():
 @app.route("/restart")
 def restart():
 	K.restart()
-	return redirect(url_for("home"))
+	return redirect(url_for("f_home"))
 
 
 @app.route("/vol_up")
@@ -644,7 +644,7 @@ def delete_file():
 			flash(getString(20) + song_path, "is-warning")
 	else:
 		flash(getString(21), "is-danger")
-	return redirect(url_for("browse"))
+	return redirect(url_for("f_browse"))
 
 
 @app.route("/files/edit", methods = ["GET", "POST"])
@@ -654,9 +654,9 @@ def edit_file():
 		song_path = request.args["song"]
 		if song_path == K.now_playing_filename:
 			flash(queue_error_msg + song_path, "is-danger")
-			return redirect(url_for("browse"))
+			return redirect(url_for("f_browse"))
 		else:
-			return render_template("edit.html", getString1 = lambda ii: getString1(request.client_lang, ii), title = getString(23), song = song_path.encode("utf-8"))
+			return render_template("f_edit.html", getString1 = lambda ii: getString1(request.client_lang, ii), title = getString(23), song = song_path.encode("utf-8"))
 	else:
 		d = request.form.to_dict()
 		if "new_file_name" in d and "old_file_name" in d:
@@ -674,7 +674,7 @@ def edit_file():
 					flash(getString(25) % (old_name, new_name), "is-warning")
 		else:
 			flash(getString(26), "is-danger")
-		return redirect(url_for("browse"))
+		return redirect(url_for("f_browse"))
 
 @app.route("/f_edit", methods = ["GET", "POST"])
 def f_edit():
@@ -923,7 +923,7 @@ def refresh():
 		K.get_available_songs()
 	else:
 		flash(getString(34), "is-danger")
-	return redirect(url_for("browse"))
+	return redirect(url_for("f_browse"))
 
 
 @app.route("/bg-process/<cmd>")
