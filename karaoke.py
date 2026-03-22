@@ -46,6 +46,18 @@ def cleanse_modules(name):
 class Karaoke:
 	ref_W, ref_H = 1920, 1080      # reference screen size, control drawing scale
 
+	# ═══════════════════════════════════════════════════════════════════════════
+	# CONFIG DEFAULTS — Change these values to set defaults for new installations
+	# These values are written to pikaraoke.cfg when it's first created.
+	# Existing installations keep their saved settings in pikaraoke.cfg.
+	# ═══════════════════════════════════════════════════════════════════════════
+	CONFIG_DEFAULTS = {
+		'normalize_vol': True,
+		'use_dnn_vocal': True,
+		'save_play_settings': True,
+		'default_subtitle_delay': -0.8,
+	}
+
 	queue = []
 	queue_json = ''
 	available_songs = []
@@ -60,13 +72,10 @@ class Karaoke:
 	has_video = True
 	has_subtitle = False
 	subtitle_delay = 0
-	default_subtitle_delay = -3/4
 	play_speed = 1.0
 	show_subtitle = True
 	last_vocal_info = 0
 	last_vocal_time = 0
-	use_DNN_vocal = True
-	normalize_vol = False
 	run_vocal = False
 	vocal_process = None
 	vocal_device = None
@@ -84,13 +93,21 @@ class Karaoke:
 
 	def __init__(self, args):
 
+		# Initialize config attributes with defaults before loading config
+		self.normalize_vol = self.CONFIG_DEFAULTS['normalize_vol']
+		self.use_DNN_vocal = self.CONFIG_DEFAULTS['use_dnn_vocal']
+		self.default_subtitle_delay = self.CONFIG_DEFAULTS['default_subtitle_delay']
+
 		# override with supplied constructor args if provided
 		self.__dict__.update(args.__dict__)
+
+		# save_delays: use args value if provided, otherwise use config default
+		if self.save_delays is None:
+			self.save_delays = self.dft_delays_file if self.CONFIG_DEFAULTS['save_play_settings'] else None
 		self.omxplayer_adev = 'both'
 		self.download_path = args.dl_path
 		self.volume_offset = self.volume = args.volume
 		self.logo_path = self.default_logo_path if args.logo_path == None else args.logo_path
-		self.subtitle_delay = self.default_subtitle_delay
 
 		# other initializations
 		self.platform = get_platform()
@@ -113,6 +130,9 @@ class Karaoke:
 			self.init_save_delays()
 
 		self.load_config()
+
+		# Set subtitle delay from loaded config
+		self.subtitle_delay = self.default_subtitle_delay
 
 		# Generate connection URL and QR code, retry in case pi is still starting up
 		# and doesn't have an IP yet (occurs when launched from /etc/rc.local)
@@ -1200,16 +1220,31 @@ default_subtitle_delay = {default_subtitle_delay}
 		if not os.path.isfile(self.config_path):
 			logging.info(f"No config file found, creating defaults at {self.config_path}")
 			self.save_config()
-			return
 		config = configparser.ConfigParser()
 		config.read(self.config_path)
 		if 'pikaraoke' in config:
 			s = config['pikaraoke']
-			self.normalize_vol = s.getboolean('normalize_vol', fallback=self.normalize_vol)
-			self.use_DNN_vocal = s.getboolean('use_dnn_vocal', fallback=self.use_DNN_vocal)
-			save_play_settings = s.getboolean('save_play_settings', fallback=bool(self.save_delays))
+			try:
+				self.normalize_vol = s.getboolean('normalize_vol', fallback=self.CONFIG_DEFAULTS['normalize_vol'])
+			except ValueError:
+				logging.warning(f"Invalid normalize_vol value, using default: {self.CONFIG_DEFAULTS['normalize_vol']}")
+				self.normalize_vol = self.CONFIG_DEFAULTS['normalize_vol']
+			try:
+				self.use_DNN_vocal = s.getboolean('use_dnn_vocal', fallback=self.CONFIG_DEFAULTS['use_dnn_vocal'])
+			except ValueError:
+				logging.warning(f"Invalid use_dnn_vocal value, using default: {self.CONFIG_DEFAULTS['use_dnn_vocal']}")
+				self.use_DNN_vocal = self.CONFIG_DEFAULTS['use_dnn_vocal']
+			try:
+				save_play_settings = s.getboolean('save_play_settings', fallback=self.CONFIG_DEFAULTS['save_play_settings'])
+			except ValueError:
+				logging.warning(f"Invalid save_play_settings value, using default: {self.CONFIG_DEFAULTS['save_play_settings']}")
+				save_play_settings = self.CONFIG_DEFAULTS['save_play_settings']
 			self.set_save_delays(save_play_settings)
-			self.default_subtitle_delay = s.getfloat('default_subtitle_delay', fallback=self.default_subtitle_delay)
+			try:
+				self.default_subtitle_delay = s.getfloat('default_subtitle_delay', fallback=self.CONFIG_DEFAULTS['default_subtitle_delay'])
+			except ValueError:
+				logging.warning(f"Invalid default_subtitle_delay value, using default: {self.CONFIG_DEFAULTS['default_subtitle_delay']}")
+				self.default_subtitle_delay = self.CONFIG_DEFAULTS['default_subtitle_delay']
 		logging.info(f"Config loaded from {self.config_path}")
 
 	def save_config(self):
@@ -1219,7 +1254,7 @@ default_subtitle_delay = {default_subtitle_delay}
 					normalize_vol=str(self.normalize_vol).lower(),
 					use_dnn_vocal=str(self.use_DNN_vocal).lower(),
 					save_play_settings=str(bool(self.save_delays)).lower(),
-					default_subtitle_delay=self.default_subtitle_delay,
+					default_subtitle_delay=getattr(self, 'default_subtitle_delay', self.CONFIG_DEFAULTS['default_subtitle_delay']),
 				))
 			logging.info(f"Config saved to {self.config_path}")
 		except Exception as e:
