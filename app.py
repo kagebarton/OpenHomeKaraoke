@@ -1120,11 +1120,6 @@ if __name__ == "__main__":
 		default = default_splash_delay,
 	)
 	parser.add_argument(
-		"-L", "--lang",
-		help = f"Set display language (default: None, set according to the current system locale {locale.getdefaultlocale()[0]})",
-		default = locale.getdefaultlocale()[0],
-	)
-	parser.add_argument(
 		"-l", "--log-level",
 		help = f"Logging level int value (DEBUG: 10, INFO: 20, WARNING: 30, ERROR: 40, CRITICAL: 50). (default: {default_log_level} )",
 		default = default_log_level,
@@ -1188,11 +1183,6 @@ if __name__ == "__main__":
 		default = None,
 	)
 	parser.add_argument(
-		"--show-overlay",
-		action = "store_true",
-		help = "Show overlay on top of video with pikaraoke QR code and IP",
-	)
-	parser.add_argument(
 		'-w', "--windowed",
 		action = "store_true",
 		help = "Start PiKaraoke in windowed mode",
@@ -1201,11 +1191,6 @@ if __name__ == "__main__":
 		'-c', "--browser-cookies",
 		default = "none",
 		help = "YouTube downloader can use browser cookies from the specified path (see the --cookies-from-browser option of yt-dlp), it can also be auto (default): automatically determine based on OS; none: do not use any browser cookies",
-	)
-	parser.add_argument(
-		"--admin-password",
-		help = "Administrator password, for locking down certain features of the web UI such as queue editing, player controls, song editing, and system shutdown. If unspecified, everyone is an admin.",
-		default = None,
 	)
 	parser.add_argument(
 		"--ssl", "-ssl",
@@ -1223,11 +1208,6 @@ if __name__ == "__main__":
 		help='cloud URL for DNN-based vocal split and speech recognition',
 	)
 	args = parser.parse_args()
-
-	set_language(args.lang)
-
-	if (args.admin_password):
-		admin_password = args.admin_password
 
 	app.jinja_env.globals.update(filename_from_path = filename_from_path)
 	app.jinja_env.globals.update(url_escape = quote)
@@ -1283,6 +1263,10 @@ if __name__ == "__main__":
 
 	# Configure karaoke process
 	os.K = K = Karaoke(args)
+
+	# Set language from config (use system locale if empty)
+	set_language(K.language or locale.getdefaultlocale()[0])
+	admin_password = K.admin_password or None
 
 	if not args.ssl:
 		threading.Thread(target=lambda:app.run(host='0.0.0.0', port=args.port+1, threaded = True, ssl_context=('cert.pem', 'key.pem'))).start()

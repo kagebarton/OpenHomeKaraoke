@@ -56,6 +56,9 @@ class Karaoke:
 		'use_dnn_vocal': True,
 		'save_play_settings': True,
 		'default_subtitle_delay': -0.8,
+		'language': '',
+		'admin_password': '',
+		'show_overlay': True,
 	}
 
 	queue = []
@@ -97,6 +100,9 @@ class Karaoke:
 		self.normalize_vol = self.CONFIG_DEFAULTS['normalize_vol']
 		self.use_DNN_vocal = self.CONFIG_DEFAULTS['use_dnn_vocal']
 		self.default_subtitle_delay = self.CONFIG_DEFAULTS['default_subtitle_delay']
+		self.language = self.CONFIG_DEFAULTS['language']
+		self.admin_password = self.CONFIG_DEFAULTS['admin_password']
+		self.show_overlay = self.CONFIG_DEFAULTS['show_overlay']
 
 		# override with supplied constructor args if provided
 		self.__dict__.update(args.__dict__)
@@ -1213,6 +1219,15 @@ save_play_settings = {save_play_settings}
 # Default subtitle delay in seconds (negative = subtitles appear earlier).
 # This is the baseline delay used when no per-song delay is saved.
 default_subtitle_delay = {default_subtitle_delay}
+
+# Display language code (e.g., en_US, ja_JP). Leave empty for system default.
+language = {language}
+
+# Administrator password for restricting certain web UI features. Leave empty for no password.
+admin_password = {admin_password}
+
+# Show overlay with QR code and IP address on top of video.
+show_overlay = {show_overlay}
 """
 
 	def load_config(self):
@@ -1239,12 +1254,20 @@ default_subtitle_delay = {default_subtitle_delay}
 			except ValueError:
 				logging.warning(f"Invalid save_play_settings value, using default: {self.CONFIG_DEFAULTS['save_play_settings']}")
 				save_play_settings = self.CONFIG_DEFAULTS['save_play_settings']
-			self.set_save_delays(save_play_settings)
 			try:
 				self.default_subtitle_delay = s.getfloat('default_subtitle_delay', fallback=self.CONFIG_DEFAULTS['default_subtitle_delay'])
 			except ValueError:
 				logging.warning(f"Invalid default_subtitle_delay value, using default: {self.CONFIG_DEFAULTS['default_subtitle_delay']}")
 				self.default_subtitle_delay = self.CONFIG_DEFAULTS['default_subtitle_delay']
+			# String settings
+			self.language = s.get('language', fallback=self.CONFIG_DEFAULTS['language'])
+			self.admin_password = s.get('admin_password', fallback=self.CONFIG_DEFAULTS['admin_password'])
+			try:
+				self.show_overlay = s.getboolean('show_overlay', fallback=self.CONFIG_DEFAULTS['show_overlay'])
+			except ValueError:
+				logging.warning(f"Invalid show_overlay value, using default: {self.CONFIG_DEFAULTS['show_overlay']}")
+				self.show_overlay = self.CONFIG_DEFAULTS['show_overlay']
+		self.set_save_delays(save_play_settings)
 		logging.info(f"Config loaded from {self.config_path}")
 
 	def save_config(self):
@@ -1255,6 +1278,9 @@ default_subtitle_delay = {default_subtitle_delay}
 					use_dnn_vocal=str(self.use_DNN_vocal).lower(),
 					save_play_settings=str(bool(self.save_delays)).lower(),
 					default_subtitle_delay=getattr(self, 'default_subtitle_delay', self.CONFIG_DEFAULTS['default_subtitle_delay']),
+					language=self.language,
+					admin_password=self.admin_password,
+					show_overlay=str(self.show_overlay).lower(),
 				))
 			logging.info(f"Config saved to {self.config_path}")
 		except Exception as e:

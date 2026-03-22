@@ -6,7 +6,7 @@ cmds=(
 #"sudo sh -c 'cp -f $HOME/.Xauthority ~ && PATH=$PATH python3 app.py -u $(whoami)'"
 #"PATH='$PATH' ./screencapture.sh -v -p 4000"
 "python3 vocal_splitter.py -d ~/pikaraoke-songs/ -rd /mnt/ramdisk"
-"DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY SDL_VIDEODRIVER=x11 python3 app.py --show-overlay -w -nv --admin-password admin --temp /mnt/ramdisk; tmux kill-session -t $session_name"
+"DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY SDL_VIDEODRIVER=x11 python3 app.py -w --temp /mnt/ramdisk; tmux kill-session -t $session_name"
 #"pavucontrol"
 )
 
