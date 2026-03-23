@@ -533,8 +533,8 @@ class Karaoke:
 		getString2 = lambda ii: os.langs.get(client_lang, os.langs['en_US'])[ii]
 		self.downloading_songs[song_url] = 1
 		dl_path = "%(title)s---%(id)s.%(ext)s"
-		fmt_hq  = 'bestvideo[height<=1080][vcodec^=h264]+bestaudio[acodec=aac]/bestvideo[height<=1080]+bestaudio'
-		fmt_std = 'bestvideo[height<=720][vcodec^=h264]+bestaudio[acodec=aac]/bestvideo[height<=720]+bestaudio'
+		fmt_hq  = 'bestvideo[height<=1080][vcodec~="h264|avc1"]+bestaudio[acodec~="aac|mp4a"]/bestvideo[height<=1080][vcodec~="h264|avc1"]+bestaudio/bestvideo[height<=1080]+bestaudio'
+		fmt_std = 'bestvideo[height<=720][vcodec~="h264|avc1"]+bestaudio[acodec~="aac|mp4a"]/bestvideo[height<=720][vcodec~="h264|avc1"]+bestaudio/bestvideo[height<=720]+bestaudio'
 		opt_sub = ['--sub-langs', sub_langs, '--write-auto-subs', '--write-subs', '--sub-format', 'srt/vtt/best', '--convert-subs', 'srt'] if sub_langs else []
 		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'mp4']
 		out_opt = ["-o", self.tmp_dir+'/'+dl_path]
