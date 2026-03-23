@@ -93,8 +93,54 @@ class VLCClient:
 		self.last_status_text = ""
 		self.last_status_time = time.time()
 
+	def get_screen_height(self):
+		"""Return the screen height in pixels, with a fallback of 1080."""
+		try:
+			if self.platform == "windows":
+				import ctypes
+				return ctypes.windll.user32.GetSystemMetrics(1)
+			elif self.platform == "osx":
+				raw = subprocess.check_output(
+					["system_profiler", "SPDisplaysDataType"], stderr=subprocess.DEVNULL
+				).decode()
+				match = re.search(r'Resolution:\s*\d+\s*x\s*(\d+)', raw)
+				if match:
+					return int(match.group(1))
+			else:  # Linux / Raspberry Pi
+				raw = subprocess.check_output(
+					["xrandr", "--current"], stderr=subprocess.DEVNULL
+				).decode()
+				match = re.search(r'current\s+\d+\s+x\s+(\d+)', raw)
+				if match:
+					return int(match.group(1))
+		except Exception:
+			pass
+		return 1080  # safe fallback
+
 	def get_marquee_cmd(self):
-		return ["--sub-source", 'logo{file=%s,position=9,x=2,opacity=200}:marq{marquee="Pikaraoke - connect at: \n%s",position=9,x=38,color=0xFFFFFF,size=11,opacity=200}' % (self.qrcode, self.url)]
+		from PIL import Image
+		screen_height = self.get_screen_height()
+		logo_size     = round(screen_height * 0.12)   # 12% of screen height in pixels
+		text_size     = round(logo_size / 7)           # proportional text size
+		text_x        = logo_size + 6                  # text sits just right of the QR code
+
+		# VLC's logo filter ignores width/height params, so pre-scale the image file instead
+		resized_path = os.path.join(self.tmp_dir, "qrcode_scaled.png")
+		try:
+			os.makedirs(self.tmp_dir, exist_ok=True)
+			img = Image.open(self.qrcode)
+			img = img.resize((logo_size, logo_size), Image.LANCZOS)
+			img.save(resized_path)
+			qrcode_file = resized_path
+		except Exception as e:
+			logging.warning("Could not resize QR code image, using original: " + str(e))
+			qrcode_file = self.qrcode
+
+		# position=5 → top-left in VLC's overlay position enum
+		return ["--sub-source",
+			'logo{file=%s,position=5,x=2,y=2,opacity=200}'
+			':marq{marquee="Pikaraoke - connect at: \n%s",position=5,x=%s,y=2,color=0xFFFFFF,size=%s,opacity=200}'
+			% (qrcode_file, self.url, text_x, text_size)]
 
 	def handle_zipped_cdg(self, file_path):
 		extracted_dir = os.path.join(self.tmp_dir, "extracted")
