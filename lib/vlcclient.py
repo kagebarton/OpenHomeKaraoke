@@ -177,6 +177,17 @@ class VLCClient:
 	def play_file(self, file_path, volume, params = []):
 		try:
 			file_path = self.process_file(file_path)
+			
+			# Check for external SRT subtitle file
+			srt_path = None
+			if file_path.endswith(('.mp4', '.mkv', '.avi', '.mov', '.flv', '.wmv', '.webm')):
+				basename_stem = os.path.splitext(os.path.basename(file_path))[0]
+				subs_dir = os.path.join(os.path.dirname(file_path), 'subs')
+				potential_srt = os.path.join(subs_dir, basename_stem + '.srt')
+				if os.path.isfile(potential_srt):
+					srt_path = potential_srt
+					logging.debug(f"Found SRT file: {srt_path}")
+			
 			self.is_transposing = True
 			if self.process is not None and self.process.poll() is None:
 				logging.debug("VLC is currently playing, stopping track...")
@@ -186,6 +197,11 @@ class VLCClient:
 					self.process.wait(2)
 				except:
 					self.process.kill()
+			
+			# Add SRT file parameter if found
+			if srt_path:
+				params = params + [f'--sub-file={srt_path}']
+			
 			command = self.cmd_base + params + [file_path]
 			if self.platform == 'osx' and not os.K.full_screen:
 				command.remove('--fullscreen')

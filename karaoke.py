@@ -170,6 +170,11 @@ class Karaoke:
 		self.get_youtubedl_version()
 		self.song2vol = Try(lambda: json.load(Open(self.download_path+'/.mp3_volume.json.gz')), {})
 		
+		# Ensure required subfolders exist
+		os.makedirs(self.download_path + 'subs', exist_ok=True)
+		os.makedirs(self.download_path + 'vocal', exist_ok=True)
+		os.makedirs(self.download_path + 'nonvocal', exist_ok=True)
+		
 		# Automatically upgrade yt-dlp if using pip
 		if not args.youtubedl_path:
 			threading.Thread(target=self._upgrade_yt_dlp).start()
@@ -530,7 +535,7 @@ class Karaoke:
 		dl_path = "%(title)s---%(id)s.%(ext)s"
 		fmt_hq  = 'bestvideo[height<=1080][vcodec^=h264]+bestaudio[acodec=aac]/bestvideo[height<=1080]+bestaudio'
 		fmt_std = 'bestvideo[height<=720][vcodec^=h264]+bestaudio[acodec=aac]/bestvideo[height<=720]+bestaudio'
-		opt_sub = ['--sub-langs', sub_langs, '--embed-subs', '--write-auto-subs', '--write-subs', '--sub-format', 'srt/vtt/best', '--convert-subs', 'srt'] if sub_langs else []
+		opt_sub = ['--sub-langs', sub_langs, '--write-auto-subs', '--write-subs', '--sub-format', 'srt/vtt/best', '--convert-subs', 'srt'] if sub_langs else []
 		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'mp4']
 		out_opt = ["-o", self.tmp_dir+'/'+dl_path]
 
@@ -551,6 +556,20 @@ class Karaoke:
 			bn = self.get_downloaded_file_basename(song_url)
 			if bn:
 				shutil.move(self.tmp_dir+'/'+bn, self.download_path+bn)
+				
+				# Move SRT files to subs subfolder
+				import glob
+				basestem_match = os.path.splitext(bn)[0]  # Remove extension from basename
+				srt_files = glob.glob(self.tmp_dir + '/*.srt')
+				for srt_file in srt_files:
+					try:
+						dst_srt = os.path.join(self.download_path, 'subs', basestem_match + '.srt')
+						shutil.move(srt_file, dst_srt)
+						logging.debug(f"Moved subtitle file to: {dst_srt}")
+						break  # Only keep first SRT match (one language per video)
+					except:
+						pass
+				
 				self.get_available_songs()
 				if enqueue:
 					self.enqueue(self.download_path+bn, song_added_by)
@@ -594,7 +613,8 @@ class Karaoke:
 				self.download_path + 'nonvocal/' + basename + '.m4a',
 				self.download_path + 'nonvocal/.' + basename + '.m4a',
 				self.download_path + 'vocal/' + basename + '.m4a',
-				self.download_path + 'vocal/.' + basename + '.m4a']
+				self.download_path + 'vocal/.' + basename + '.m4a',
+				self.download_path + 'subs/' + basestem[0] + '.srt']
 
 	def delete_if_exist(self, filename):
 		if os.path.isfile(filename):
