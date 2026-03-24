@@ -1,4 +1,4 @@
-import os, sys, io, random, time, json, datetime
+import os, sys, io, random, time, json, datetime, re
 import logging, socket, subprocess, threading
 import multiprocessing as mp
 import shutil, psutil, traceback, tarfile, requests
@@ -25,7 +25,7 @@ if get_platform() != "windows":
 	from signal import SIGALRM, alarm, signal, SIGTERM
 	signal(SIGTERM, lambda signum, stack_frame: os.K.stop())
 
-STD_VOL = 65536/8/np.sqrt(2)
+TARGET_LOUDNESS_LUFS = -16.0  # Target integrated loudness for normalization (EBU R128 standard)
 ip2websock, ip2pane = {}, {}
 
 ws_send = lambda ip, msg: ip2websock[ip].send(msg) if ip in ip2websock else None
@@ -168,8 +168,7 @@ class Karaoke:
 		# get songs from download_path
 		self.get_available_songs()
 		self.get_youtubedl_version()
-		self.song2vol = Try(lambda: json.load(Open(self.download_path+'/.mp3_volume.json.gz')), {})
-		
+
 		# Ensure required subfolders exist
 		os.makedirs(self.download_path + 'subs', exist_ok=True)
 		os.makedirs(self.download_path + 'vocal', exist_ok=True)
@@ -1184,15 +1183,36 @@ class Karaoke:
 
 	def get_mp3_volume(self, filename):
 		try:
-			basename, md5, fsize = os.path.basename(filename), md5sum(filename), os.stat(filename).st_size
-			vol_fsize_md5 = self.song2vol.get(basename, [0]*3)
-			if fsize == vol_fsize_md5[1] and md5 == vol_fsize_md5[2]:
-				return vol_fsize_md5[0]
-			pcm_data = subprocess.check_output(['ffmpeg', '-i', filename, '-vn', '-f', 's16le', '-acodec', 'pcm_s16le', '-'], stderr = subprocess.DEVNULL)
-			volume_val = np.clip(np.sqrt(np.std(np.frombuffer(pcm_data, dtype = np.int16))/STD_VOL), 1/16, 16)
-			self.song2vol[basename] = [volume_val, fsize, md5]
-			with Open(self.download_path+'/.mp3_volume.json.gz', 'wb') as fp:
-				json.dump(self.song2vol, fp, indent=1)
+			basename = os.path.basename(filename)
+			md5, fsize = md5sum(filename), os.stat(filename).st_size
+			# Check cache in delays dict
+			vol_data = self.delays.get(basename, {}).get('volume', {})
+			if vol_data and fsize == vol_data.get('size') and md5 == vol_data.get('md5'):
+				return vol_data['val']
+			# Measure EBU R128 integrated loudness using ebur128 filter
+			output = subprocess.check_output(
+				['ffmpeg', '-i', filename, '-vn', '-af', 'ebur128=peak=true', '-f', 'null', '-'],
+				stderr=subprocess.STDOUT
+			).decode('utf-8', errors='ignore')
+			# Parse integrated loudness from Summary section
+			# Format (multi-line):
+			#   Integrated loudness:
+			#     I:         -12.3 LUFS
+			i_match = re.search(r'Integrated loudness:\s*\n\s*I:\s*([-+]?\d+\.?\d*)\s*LUFS', output)
+			if i_match:
+				integrated_loudness = float(i_match.group(1))
+			else:
+				logging.warning(f"Could not parse integrated loudness for {filename}, using default")
+				integrated_loudness = TARGET_LOUDNESS_LUFS
+			# Calculate volume multiplier to reach target loudness
+			gain_db = TARGET_LOUDNESS_LUFS - integrated_loudness
+			volume_val = np.clip(10 ** (gain_db / 20), 1/16, 16)
+			# Store in delays dict
+			if basename not in self.delays:
+				self.delays[basename] = {}
+			self.delays[basename]['volume'] = {'val': volume_val, 'size': fsize, 'md5': md5, 'lufs': integrated_loudness}
+			self.delays_dirty = True
+			self.auto_save_delays()
 			return volume_val
 		except:
 			logging.warning(f"Could not analyse volume for {filename}, skipping normalisation for this song")

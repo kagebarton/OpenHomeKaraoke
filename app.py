@@ -685,11 +685,13 @@ def f_edit():
 	else:
 		song = AudSeg.from_file(song_path)
 		saved_delays = K.delays.get(os.path.basename(song_path), {}) if K.save_delays else {}
+		vol_data = saved_delays.get('volume', {})
+		lufs = vol_data.get('lufs') if vol_data else None
 		return render_template("f_edit.html", getString1 = lambda ii: getString1(request.client_lang, ii), dBFS = '%.2f'%song.dBFS,
 			hhmmss = sec2hhmmss(song.duration_seconds), title = getString(23), song = song_path.encode("utf-8"),
 			audio_delay = saved_delays.get('audio_delay', 0),
 			subtitle_delay = saved_delays.get('subtitle_delay', K.default_subtitle_delay),
-			save_delays_enabled = bool(K.save_delays))
+			save_delays_enabled = bool(K.save_delays), lufs=lufs)
 
 @app.route("/edit_song", methods = ["POST"])
 def rename():
@@ -1217,7 +1219,7 @@ if __name__ == "__main__":
 		os.makedirs(args.dl_path)
 
 	# save_delays and normalize_vol are managed via the config file (pikaraoke.cfg)
-	args.dft_delays_file = args.dl_path + '.delays'
+	args.dft_delays_file = args.dl_path + '.songdata'
 	args.save_delays = None
 
 	# Configure karaoke process
