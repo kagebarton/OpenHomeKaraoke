@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Karaoke Test</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f0f14;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+      gap: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: #a78bfa;
+    }
+
+    /* Progress bar */
+    #progress-wrap {
+      width: 100%;
+      max-width: 600px;
+    }
+
+    #progress-bar-bg {
+      height: 6px;
+      background: #2a2a3a;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    #progress-bar-fill {
+      height: 100%;
+      background: #7c3aed;
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.5s linear;
+    }
+
+    #progress-time {
+      font-size: 0.75rem;
+      color: #888;
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    /* Control cards */
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      width: 100%;
+      max-width: 600px;
+    }
+
+    @media (max-width: 480px) {
+      .controls { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: #1a1a28;
+      border: 1px solid #2a2a40;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+    }
+
+    .card-full { grid-column: 1 / -1; }
+
+    .card label {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #888;
+      margin-bottom: 0.75rem;
+    }
+
+    .card label span {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #e8e8f0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      background: #2a2a3a;
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #7c3aed;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    input[type=range]:hover::-webkit-slider-thumb {
+      background: #a78bfa;
+    }
+
+    /* Restart notice (flashes during FFmpeg restart) */
+    .restarting input[type=range]::-webkit-slider-thumb {
+      background: #f59e0b;
+    }
+
+    /* Pause button */
+    #pause-btn {
+      display: block;
+      width: 100%;
+      padding: 0.85rem;
+      border: none;
+      border-radius: 8px;
+      background: #7c3aed;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    #pause-btn:hover  { background: #6d28d9; }
+    #pause-btn.paused { background: #059669; }
+    #pause-btn.paused:hover { background: #047857; }
+
+    /* Sub delay note */
+    .note {
+      font-size: 0.7rem;
+      color: #555;
+      margin-top: 0.4rem;
+    }
+
+    /* Status pill */
+    #status-pill {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 99px;
+      background: #1a1a28;
+      border: 1px solid #2a2a40;
+      color: #6b7280;
+    }
+
+    #status-pill.live { border-color: #7c3aed; color: #a78bfa; }
+  </style>
+</head>
+<body>
+
+  <h1>🎤 Karaoke Test</h1>
+  <div id="status-pill">Connecting…</div>
+
+  <div id="progress-wrap">
+    <div id="progress-bar-bg"><div id="progress-bar-fill"></div></div>
+    <div id="progress-time">--:-- / --:--</div>
+  </div>
+
+  <div class="controls">
+
+    <!-- Pitch -->
+    <div class="card" id="pitch-card">
+      <label>Pitch <span id="pitch-val">{{ state.pitch_semitones }}st</span></label>
+      <input type="range" id="pitch"
+             min="-6" max="6" step="1"
+             value="{{ state.pitch_semitones }}" />
+    </div>
+
+    <!-- Subtitle Delay -->
+    <div class="card">
+      <label>Subtitle Delay <span id="sub-delay-val">{{ state.sub_delay }}s</span></label>
+      <input type="range" id="sub-delay"
+             min="-5" max="5" step="0.1"
+             value="{{ state.sub_delay }}" />
+      <div class="note">Instant — no restart</div>
+    </div>
+
+    <!-- Vocal Volume -->
+    <div class="card" id="vocal-card">
+      <label>Vocal Volume <span id="vocal-val">{{ (state.vocal_vol * 100)|int }}%</span></label>
+      <input type="range" id="vocal-vol"
+             min="0" max="1" step="0.01"
+             value="{{ state.vocal_vol }}" />
+    </div>
+
+    <!-- Nonvocal Volume -->
+    <div class="card" id="nonvocal-card">
+      <label>Music Volume <span id="nonvocal-val">{{ (state.nonvocal_vol * 100)|int }}%</span></label>
+      <input type="range" id="nonvocal-vol"
+             min="0" max="1" step="0.01"
+             value="{{ state.nonvocal_vol }}" />
+    </div>
+
+    <!-- Pause / Play -->
+    <div class="card card-full">
+      <button id="pause-btn">⏸ Pause</button>
+    </div>
+
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    const $ = id => document.getElementById(id);
+
+    async function post(url, body) {
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        return r.ok;
+      } catch { return false; }
+    }
+
+    function fmt(sec) {
+      if (sec == null) return '--:--';
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    // -----------------------------------------------------------------------
+    // Slider debounce — sliders that trigger a restart get a 400ms debounce
+    // so we don't spam restarts while dragging.
+    // Sub delay is instant so no debounce needed there.
+    // -----------------------------------------------------------------------
+    function debounce(fn, ms) {
+      let t;
+      return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    }
+
+    function markRestarting(cardId, state) {
+      const card = $(cardId);
+      if (state) card.classList.add('restarting');
+      else        card.classList.remove('restarting');
+    }
+
+    // -----------------------------------------------------------------------
+    // Pitch
+    // -----------------------------------------------------------------------
+    const pitchInput = $('pitch');
+    const pitchVal   = $('pitch-val');
+
+    pitchInput.addEventListener('input', () => {
+      pitchVal.textContent = `${pitchInput.value}st`;
+    });
+
+    const sendPitch = debounce(async (v) => {
+      markRestarting('pitch-card', true);
+      await post('/pitch', {value: parseFloat(v)});
+      markRestarting('pitch-card', false);
+    }, 400);
+
+    pitchInput.addEventListener('input', () => sendPitch(pitchInput.value));
+
+    // -----------------------------------------------------------------------
+    // Vocal volume
+    // -----------------------------------------------------------------------
+    const vocalInput = $('vocal-vol');
+    const vocalVal   = $('vocal-val');
+
+    vocalInput.addEventListener('input', () => {
+      vocalVal.textContent = `${Math.round(vocalInput.value * 100)}%`;
+    });
+
+    const sendVocal = debounce(async (v) => {
+      markRestarting('vocal-card', true);
+      await post('/vocal_vol', {value: parseFloat(v)});
+      markRestarting('vocal-card', false);
+    }, 400);
+
+    vocalInput.addEventListener('input', () => sendVocal(vocalInput.value));
+
+    // -----------------------------------------------------------------------
+    // Nonvocal volume
+    // -----------------------------------------------------------------------
+    const nonvocalInput = $('nonvocal-vol');
+    const nonvocalVal   = $('nonvocal-val');
+
+    nonvocalInput.addEventListener('input', () => {
+      nonvocalVal.textContent = `${Math.round(nonvocalInput.value * 100)}%`;
+    });
+
+    const sendNonvocal = debounce(async (v) => {
+      markRestarting('nonvocal-card', true);
+      await post('/nonvocal_vol', {value: parseFloat(v)});
+      markRestarting('nonvocal-card', false);
+    }, 400);
+
+    nonvocalInput.addEventListener('input', () => sendNonvocal(nonvocalInput.value));
+
+    // -----------------------------------------------------------------------
+    // Subtitle delay — instant, no debounce needed
+    // -----------------------------------------------------------------------
+    const subDelayInput = $('sub-delay');
+    const subDelayVal   = $('sub-delay-val');
+
+    subDelayInput.addEventListener('input', async () => {
+      const v = parseFloat(subDelayInput.value);
+      subDelayVal.textContent = `${v.toFixed(1)}s`;
+      await post('/sub_delay', {value: v});
+    });
+
+    // -----------------------------------------------------------------------
+    // Pause / Play
+    // -----------------------------------------------------------------------
+    const pauseBtn = $('pause-btn');
+    let paused = false;
+
+    pauseBtn.addEventListener('click', async () => {
+      const r = await fetch('/pause', {method: 'POST'});
+      const data = await r.json();
+      paused = data.paused;
+      updatePauseBtn();
+    });
+
+    function updatePauseBtn() {
+      if (paused) {
+        pauseBtn.textContent = '▶ Play';
+        pauseBtn.classList.add('paused');
+      } else {
+        pauseBtn.textContent = '⏸ Pause';
+        pauseBtn.classList.remove('paused');
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Status polling — updates progress bar every second
+    // -----------------------------------------------------------------------
+    const statusPill = $('status-pill');
+    const progressFill = $('progress-bar-fill');
+    const progressTime = $('progress-time');
+
+    async function pollStatus() {
+      try {
+        const r    = await fetch('/status');
+        const data = await r.json();
+
+        statusPill.textContent = data.running ? '● Live' : '○ Idle';
+        statusPill.className   = data.running ? 'live' : '';
+
+        const pos = data.time_pos;
+        const dur = data.duration;
+        if (pos != null && dur != null && dur > 0) {
+          progressFill.style.width = `${(pos / dur * 100).toFixed(1)}%`;
+          progressTime.textContent = `${fmt(pos)} / ${fmt(dur)}`;
+        }
+      } catch {
+        statusPill.textContent = '○ Offline';
+        statusPill.className   = '';
+      }
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 1000);
+  </script>
+
+</body>
+</html>
