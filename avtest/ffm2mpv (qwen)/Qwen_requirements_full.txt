@@ -1,0 +1,70 @@
+# Qwen Pipeline V2 - Complete Requirements
+# =========================================
+# Real-time audio mixing with optional rubberband pitch shifting
+#
+# ============================================================
+# SYSTEM PACKAGES (for rubberband support)
+# ============================================================
+#
+# Ubuntu/Debian:
+#   sudo apt-get install librubberband-dev libsndfile1-dev portaudio19-dev
+#
+# ============================================================
+# PYTHON PACKAGES
+# ============================================================
+#
+# Legend:
+#   [✓] = Already installed in your environment
+#   [ ] = Needs installation
+#   [*] = Optional (for high-quality pitch shifting)
+#
+# -------------------------------------------------------------
+
+# Core dependencies
+numpy>=1.20.0                 # [✓] Already installed (1.26.4)
+Flask>=2.0.0                  # [✓] Already installed (2.3.1)
+
+# Audio output - install at least one:
+sounddevice>=0.4.0            # [✓] Already installed (0.5.5)
+# simpleaudio>=1.0.4          # [ ] Alternative (optional)
+# pyaudio>=0.2.11             # [ ] Alternative (optional)
+
+# Audio file reading
+soundfile>=0.10.0             # [✓] Already installed
+
+# Real-time pitch shifting (OPTIONAL):
+# * Without rubberband: Fallback resampling (changes tempo with pitch)
+# * With rubberband: High-quality pitch shifting (tempo preserved)
+#
+# To enable high-quality pitch shifting:
+#   1. sudo apt-get install librubberband-dev libsndfile1-dev
+#   2. pip install rubberband
+#
+# rubberband>=0.2.0           # [*] Optional - high-quality pitch shift
+#
+# ============================================================
+# INSTALLATION
+# ============================================================
+#
+# Basic installation (works without rubberband):
+#   pip install numpy Flask sounddevice soundfile
+#
+# Full installation (with high-quality pitch shifting):
+#   sudo apt-get install librubberband-dev libsndfile1-dev portaudio19-dev
+#   pip install numpy Flask sounddevice soundfile rubberband
+#
+# ============================================================
+# WHAT'S ALREADY INSTALLED
+# ============================================================
+#
+# Your environment already has:
+#   ✓ numpy (audio processing)
+#   ✓ Flask (web server)
+#   ✓ sounddevice (audio output)
+#   ✓ soundfile (audio file reading)
+#   ✓ librosa, demucs (audio ML libraries)
+#
+# The code will work without rubberband using a fallback
+# resampling method. Install rubberband for better quality.
+#
+# ============================================================

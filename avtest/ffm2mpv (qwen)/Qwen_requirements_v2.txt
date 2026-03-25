@@ -1,0 +1,25 @@
+# Qwen Pipeline V2 Requirements
+# ==============================
+# Real-time audio mixing with rubberband pitch shifting
+#
+# Installation (Ubuntu/Debian):
+# -----------------------------
+# 1. Install system libraries:
+#    sudo apt-get install librubberband2-dev libsndfile1-dev portaudio19-dev
+#
+# 2. Install Python packages:
+#    pip install -r Qwen_requirements_v2.txt
+
+# Real-time pitch shifting (requires librubberband2-dev, libsndfile1-dev)
+rubberband>=0.2.0
+
+# Audio processing
+numpy>=1.20.0
+
+# Audio output - install at least one:
+sounddevice>=0.4.0      # Recommended - best latency, uses PortAudio
+# simpleaudio>=1.0.4    # Alternative - simpler, no external deps
+# pyaudio>=0.2.11       # Alternative - widely supported
+
+# Optional: for development/testing
+# pytest>=7.0.0
