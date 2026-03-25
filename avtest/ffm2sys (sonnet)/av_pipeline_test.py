@@ -3,7 +3,7 @@
 AV Pipeline Test
 ================
 MPV plays video + subtitles (no audio).
-sounddevice streams the m4a audio independently.
+sounddevice streams mixed vocal + nonvocal audio independently.
 A sync thread polls MPV's IPC socket and corrects drift.
 
 Dependencies:
@@ -28,15 +28,18 @@ import sounddevice as sd
 # ════════════════════════════════════════════════════════════════════════════════
 
 VIDEO_FILE      = "../song/video.mp4"
-AUDIO_FILE      = "../song/nonvocal.m4a"
-SUBTITLE_FILE   = "../song/subs.srt"   # set to "" to skip subtitles
+VOCAL_FILE      = "../song/vocal.m4a"      # vocal track
+NONVOCAL_FILE   = "../song/nonvocal.m4a"   # instrumental track
+SUBTITLE_FILE   = "../song/subs.srt"       # set to "" to skip subtitles
+SUBTITLE_DELAY  = -1.0                     # subtitle delay in seconds: positive = later, negative = earlier
 
 SAMPLE_RATE     = 44100   # Hz — must match your source audio, or librosa will resample
 BLOCK_SIZE      = 1024    # samples per audio callback; lower = less latency, more CPU load
 CHANNELS        = 2       # output channels: 1 = mono, 2 = stereo
 
-VOLUME          = 1.0     # master volume scalar: 0.0 (silent) – 2.0 (double amplitude)
-PITCH_SEMITONES = 0.0     # semitones to shift: 0.0 = no change, +2.0 = up a whole step
+VOCAL_VOLUME    = 0.25     # vocal track volume: 0.0 (silent) – 2.0 (double amplitude)
+NONVOCAL_VOLUME = 1.0     # nonvocal track volume: 0.0 (silent) – 2.0 (double amplitude)
+PITCH_SEMITONES = -1.0     # semitones to shift: 0.0 = no change, +2.0 = up a whole step
 
 MPV_IPC_SOCKET  = "/tmp/mpv_test.sock"
 MPV_IPC_TIMEOUT = 10.0    # seconds to wait for MPV IPC socket to become available
@@ -48,8 +51,9 @@ SYNC_THRESHOLD  = 0.080   # seconds of drift before snapping audio position (80 
 #  SHARED STATE
 # ════════════════════════════════════════════════════════════════════════════════
 
-audio_data: np.ndarray = None   # (n_samples,) float32, mono
-audio_pos  = 0                  # current read head in samples
+vocal_data: np.ndarray = None    # vocal track samples
+nonvocal_data: np.ndarray = None # nonvocal track samples
+audio_pos  = 0                   # current read head in samples
 pos_lock   = threading.Lock()
 stop_event = threading.Event()
 
@@ -156,7 +160,7 @@ def sync_thread_fn(mpv: MPVSocket):
         drift = audio_time - mpv_time
         if abs(drift) > SYNC_THRESHOLD:
             corrected = int(mpv_time * SAMPLE_RATE)
-            corrected = max(0, min(corrected, len(audio_data) - 1))
+            corrected = max(0, min(corrected, len(vocal_data) - 1))
             with pos_lock:
                 audio_pos = corrected
             print(f"[sync] drift {drift * 1000:+.0f} ms → snapped to {mpv_time:.2f}s")
@@ -169,7 +173,7 @@ def sync_thread_fn(mpv: MPVSocket):
 # ════════════════════════════════════════════════════════════════════════════════
 
 def audio_callback(outdata: np.ndarray, frames: int, time_info, status):
-    """Fill outdata with the next chunk of audio, applying volume."""
+    """Fill outdata with the next chunk of mixed audio, applying per-track volume."""
     global audio_pos
 
     if status:
@@ -180,20 +184,28 @@ def audio_callback(outdata: np.ndarray, frames: int, time_info, status):
         audio_pos = start + frames
 
     end         = start + frames
-    available   = len(audio_data) - start
-
-    if available <= 0:
+    
+    # Get vocal chunk
+    vocal_available = len(vocal_data) - start
+    if vocal_available <= 0:
         outdata[:] = 0
         raise sd.CallbackStop()
-
-    # Slice, pad if near the end
-    chunk = audio_data[start:end]
-    if len(chunk) < frames:
-        chunk = np.pad(chunk, (0, frames - len(chunk)))
-
-    # Apply volume, then broadcast mono → stereo if needed
-    chunk = (chunk * VOLUME).reshape(-1, 1)
-    outdata[:] = np.broadcast_to(chunk, (frames, CHANNELS))
+    vocal_chunk = vocal_data[start:end]
+    if len(vocal_chunk) < frames:
+        vocal_chunk = np.pad(vocal_chunk, (0, frames - len(vocal_chunk)))
+    
+    # Get nonvocal chunk
+    nonvocal_available = len(nonvocal_data) - start
+    nonvocal_chunk = nonvocal_data[start:end]
+    if len(nonvocal_chunk) < frames:
+        nonvocal_chunk = np.pad(nonvocal_chunk, (0, frames - len(nonvocal_chunk)))
+    
+    # Mix both tracks with independent volume control
+    mixed = (vocal_chunk * VOCAL_VOLUME) + (nonvocal_chunk * NONVOCAL_VOLUME)
+    
+    # Broadcast mono → stereo
+    mixed = mixed.reshape(-1, 1)
+    outdata[:] = np.broadcast_to(mixed, (frames, CHANNELS))
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -201,10 +213,14 @@ def audio_callback(outdata: np.ndarray, frames: int, time_info, status):
 # ════════════════════════════════════════════════════════════════════════════════
 
 def main():
-    global audio_data
+    global vocal_data, nonvocal_data
 
-    # 1. Load and (optionally) pitch-shift audio up front
-    audio_data = load_audio(AUDIO_FILE, SAMPLE_RATE, PITCH_SEMITONES)
+    # 1. Load and (optionally) pitch-shift both audio tracks
+    print("[main] Loading vocal track...")
+    vocal_data = load_audio(VOCAL_FILE, SAMPLE_RATE, PITCH_SEMITONES)
+    
+    print("[main] Loading nonvocal track...")
+    nonvocal_data = load_audio(NONVOCAL_FILE, SAMPLE_RATE, PITCH_SEMITONES)
 
     # 2. Build MPV command — video only, IPC socket for sync
     mpv_cmd = [
@@ -215,7 +231,10 @@ def main():
         "--hr-seek=yes",    # more accurate seeks
     ]
     if SUBTITLE_FILE:
-        mpv_cmd += [f"--sub-file={SUBTITLE_FILE}"]
+        mpv_cmd += [
+            f"--sub-file={SUBTITLE_FILE}",
+            f"--sub-delay={SUBTITLE_DELAY}",
+        ]
     mpv_cmd.append(VIDEO_FILE)
 
     print("[mpv ] Launching MPV…")
@@ -238,7 +257,7 @@ def main():
     # 5. Start sync thread
     sync_t = threading.Thread(target=sync_thread_fn, args=(mpv_ipc,), daemon=True)
 
-    print("[main] Starting playback. Close the MPV window to quit.")
+    print(f"[main] Starting playback (vocal={VOCAL_VOLUME}, nonvocal={NONVOCAL_VOLUME}). Close the MPV window to quit.")
     with stream:
         sync_t.start()
         mpv_proc.wait()     # block until MPV exits
