@@ -1,24 +1,24 @@
-import os, sys, io, random, time, json, datetime, re
+import os, sys, time, json, re
 import logging, socket, subprocess, threading
 import multiprocessing as mp
 import shutil, psutil, traceback, tarfile, requests
-import configparser
 from subprocess import check_output
 from collections import *
 
 import numpy as np
 
-from constants import media_types
-
 import pygame
 import qrcode
 import arabic_reshaper
 from bidi.algorithm import get_display
-from unidecode import unidecode
-from flask import request
 from lib import omxclient, vlcclient
 from lib.get_platform import *
 from lib.NLP import *
+from lib.notifications import flash, ws_send, ip2websock, ip2pane
+from lib.config_manager import ConfigMixin
+from lib.song_library import SongLibraryMixin
+from lib.downloader import DownloaderMixin
+from lib.queue_manager import QueueMixin
 from app import getString
 
 if get_platform() != "windows":
@@ -26,42 +26,10 @@ if get_platform() != "windows":
 	signal(SIGTERM, lambda signum, stack_frame: os.K.stop())
 
 TARGET_LOUDNESS_LUFS = -16.0  # Target integrated loudness for normalization (EBU R128 standard)
-ip2websock, ip2pane = {}, {}
-
-ws_send = lambda ip, msg: ip2websock[ip].send(msg) if ip in ip2websock else None
-
-def flash(message: str, category: str = "message", client_ip = ''):
-	ws_send(client_ip or request.remote_addr, f'showNotification("{message}", "{category}")')
-
-def cleanse_modules(name):
-	try:
-		for module_name in sorted(sys.modules.keys()):
-			if module_name.startswith(name):
-				del sys.modules[module_name]
-		del globals()[name]
-	except:
-		pass
 
 
-class Karaoke:
+class Karaoke(ConfigMixin, SongLibraryMixin, DownloaderMixin, QueueMixin):
 	ref_W, ref_H = 1920, 1080      # reference screen size, control drawing scale
-
-	# ═══════════════════════════════════════════════════════════════════════════
-	# CONFIG DEFAULTS — Change these values to set defaults for new installations
-	# These values are written to pikaraoke.cfg when it's first created.
-	# Existing installations keep their saved settings in pikaraoke.cfg.
-	# ═══════════════════════════════════════════════════════════════════════════
-	CONFIG_DEFAULTS = {
-		# UI settings (in order of appearance)
-		'save_play_settings': True,
-		'default_subtitle_delay': -0.8,
-		'normalize_vol': True,
-		'use_dnn_vocal': True,
-		'language': '',
-		# Config-file only settings
-		'admin_password': '',
-		'show_overlay': True,
-	}
 
 	queue = []
 	queue_json = ''
@@ -173,7 +141,7 @@ class Karaoke:
 		os.makedirs(self.download_path + 'subs', exist_ok=True)
 		os.makedirs(self.download_path + 'vocal', exist_ok=True)
 		os.makedirs(self.download_path + 'nonvocal', exist_ok=True)
-		
+
 		# Automatically upgrade yt-dlp if using pip
 		if not args.youtubedl_path:
 			threading.Thread(target=self._upgrade_yt_dlp).start()
@@ -199,21 +167,6 @@ class Karaoke:
 			self.cloud_tasks = []
 			threading.Thread(target=self._cloud_thread).start()
 
-	def _upgrade_yt_dlp(self):
-		import pip, yt_dlp
-		fn = '.yt-dlp.last-update'
-		date_today = datetime.datetime.today().isoformat()[:10]
-		date_last = Try(lambda: open(fn).read().strip(), '')
-		if date_today == date_last:
-			logging.info(f"yt-dlp is up-to-date at {date_today}")
-			return
-
-		self.upgrade_youtubedl()
-		self.get_youtubedl_version()
-		with open(fn, 'w') as fp:
-			print(date_today, file=fp)
-
-
 	def _cloud_thread(self):
 		while True:
 			self.cloud_trigger.wait()
@@ -238,7 +191,6 @@ class Karaoke:
 				except:
 					traceback.print_exc()
 
-
 	# Other ip-getting methods are unreliable and sometimes return 127.0.0.1
 	# https://stackoverflow.com/a/28950776
 	def get_ip(self):
@@ -252,24 +204,6 @@ class Karaoke:
 		finally:
 			s.close()
 		return IP
-
-	def get_youtubedl_version(self):
-		self.youtubedl_version = self.call_yt_dlp(['--version'], True).strip()
-		return self.youtubedl_version
-
-	def upgrade_youtubedl(self):
-		logging.info("Upgrading youtube-dl, current version: %s" % self.youtubedl_version)
-		if self.youtubedl_path:
-			self.call_yt_dlp(['-U'])
-		else:
-			try:
-				import pip
-				pip.main(['install', 'yt-dlp', '-U'])
-				cleanse_modules('yt_dlp')
-				import yt_dlp
-			except:
-				pass
-		logging.info("Done. New version: %s" % self.get_youtubedl_version())
 
 	def is_network_connected(self):
 		return not len(self.ip) < 7
@@ -436,6 +370,7 @@ class Karaoke:
 				found = ii
 				break
 		if found is None:
+			from unidecode import unidecode
 			text = unidecode(text)
 			found = 0
 
@@ -456,226 +391,6 @@ class Karaoke:
 				render = font.render(text, *kargs)
 			break
 		return render
-
-	def call_yt_dlp(self, argv, get_stdout = False):
-		if self.youtubedl_path:
-			if get_stdout:
-				return subprocess.check_output([self.youtubedl_path]+argv).decode("utf-8")
-			else:
-				return subprocess.call([self.youtubedl_path]+argv)
-		ret_code = 0
-		if get_stdout:
-			old_stdout = sys.stdout
-			sys.stdout = io.StringIO()
-		try:
-			import yt_dlp
-			yt_dlp.main(argv)
-		except SystemExit as e:
-			ret_code = e.code
-		if get_stdout:
-			ret_stdout = sys.stdout
-			sys.stdout = old_stdout
-			return ret_stdout.getvalue()
-		return ret_code
-
-	def get_search_results(self, textToSearch):
-		logging.info("Searching YouTube for: " + textToSearch)
-		num_results = 10
-		yt_search = 'ytsearch%d:%s' % (num_results, textToSearch)
-		cmd = ["-j", "--no-playlist", "--flat-playlist", yt_search]
-		logging.debug("Youtube-dl search command: " + " ".join(cmd))
-		try:
-			# output = subprocess.check_output(cmd).decode("utf-8")
-			output = self.call_yt_dlp(cmd, True)
-			logging.debug("Search results: " + output)
-			rc = []
-			for each in output.split("\n"):
-				if len(each) > 2:
-					j = json.loads(each)
-					if (not "title" in j) or (not "url" in j):
-						continue
-					rc.append([j["title"], j["url"], j["id"], sec2hhmmss(j["duration"])])
-			return rc
-		except Exception as e:
-			logging.debug("Error while executing search: " + str(e))
-			raise e
-
-	def get_yt_dlp_json(self, url):
-		out_json = self.call_yt_dlp(['-j', '--remote-components', 'ejs:github', url], True)
-		return json.loads(out_json)
-
-	def get_downloaded_file_basename(self, url):
-		try:
-			youtube_id = url.split("watch?v=")[1].split('&')[0]
-		except:
-			try:
-				info_json = self.get_yt_dlp_json(url)
-				youtube_id = info_json['id']
-			except:
-				logging.error("Error parsing video id from url: " + url)
-				return None
-
-		try:
-			return [i for i in os.listdir(self.tmp_dir) if youtube_id in i][0]
-		except:
-			pass
-
-		try:
-			info_json = self.get_yt_dlp_json(url)
-			filename = f"{info_json['title']}---{info_json['id']}.{info_json['ext']}"
-			return filename if os.path.isfile(self.tmp_dir+'/'+filename) else None
-		except:
-			return None
-
-	def download_video(self, client_lang='', client_ip='', song_url = '', enqueue = False, song_added_by = "Pikaraoke", sub_langs = '', high_quality = False):
-		logging.info("Downloading video: " + song_url)
-		getString2 = lambda ii: os.langs.get(client_lang, os.langs['en_US'])[ii]
-		self.downloading_songs[song_url] = 1
-		dl_path = "%(title)s---%(id)s.%(ext)s"
-		fmt_hq  = 'bestvideo[height<=1080][vcodec~="h264|avc1"]+bestaudio[acodec~="aac|mp4a"]/bestvideo[height<=1080][vcodec~="h264|avc1"]+bestaudio/bestvideo[height<=1080]+bestaudio'
-		fmt_std = 'bestvideo[height<=720][vcodec~="h264|avc1"]+bestaudio[acodec~="aac|mp4a"]/bestvideo[height<=720][vcodec~="h264|avc1"]+bestaudio/bestvideo[height<=720]+bestaudio'
-		opt_sub = ['--sub-langs', sub_langs, '--write-auto-subs', '--write-subs', '--sub-format', 'srt/vtt/best', '--convert-subs', 'srt'] if sub_langs else []
-		base_opts = ['--fixup', 'force', '--socket-timeout', '3', '-R', 'infinite', '--remux-video', 'mp4']
-		out_opt = ["-o", self.tmp_dir+'/'+dl_path]
-
-		# Try requested quality first, fall back to standard, then no format constraint
-		attempts = ([fmt_hq, fmt_std] if high_quality else [fmt_std]) + [None]
-		rc = 1
-		for fmt in attempts:
-			opt_quality = ['-f', fmt] if fmt else []
-			cmd = base_opts + self.cookies_opt + opt_quality + out_opt + opt_sub + [song_url]
-			logging.info("Youtube-dl command: " + " ".join(cmd))
-			rc = self.call_yt_dlp(cmd)
-			if rc == 0:
-				break
-			logging.error(f"Download failed with format '{fmt}', trying next fallback ...")
-		if rc == 0:
-			logging.debug("Song successfully downloaded: " + song_url)
-			self.downloading_songs[song_url] = 0
-			bn = self.get_downloaded_file_basename(song_url)
-			if bn:
-				shutil.move(self.tmp_dir+'/'+bn, self.download_path+bn)
-				
-				# Move SRT files to subs subfolder
-				import glob
-				basestem_match = os.path.splitext(bn)[0]  # Remove extension from basename
-				srt_files = glob.glob(self.tmp_dir + '/*.srt')
-				for srt_file in srt_files:
-					try:
-						dst_srt = os.path.join(self.download_path, 'subs', basestem_match + '.srt')
-						shutil.move(srt_file, dst_srt)
-						logging.debug(f"Moved subtitle file to: {dst_srt}")
-						break  # Only keep first SRT match (one language per video)
-					except:
-						pass
-				
-				self.get_available_songs()
-				if enqueue:
-					self.enqueue(self.download_path+bn, song_added_by)
-					self.downloading_songs[song_url] = '00'
-					flash(getString2(189)+' '+getString2(191), client_ip = client_ip)
-				else:
-					flash(getString2(189), client_ip = client_ip)
-			else:
-				logging.error("Error queueing song: " + song_url)
-				self.downloading_songs[song_url] = '01'
-				flash(getString2(189)+' '+getString2(192), client_ip = client_ip)
-		else:
-			logging.error("Error downloading song: " + song_url)
-			self.downloading_songs[song_url] = -1
-			flash(getString2(190), client_ip = client_ip)
-		return ws_send(client_ip, 'download_ended()')
-
-	def get_available_songs(self):
-		logging.info("Fetching available songs in: " + self.download_path)
-		files_grabbed = []
-		self.songname_trans = {}
-		for bn in os.listdir(self.download_path):
-			fn = self.download_path + bn
-			if not bn.startswith('.') and os.path.isfile(fn):
-				if os.path.splitext(fn)[1].lower() in media_types:
-					files_grabbed.append(fn)
-					trans = unidecode(self.filename_from_path(fn)).lower()
-					# strip leading non-transliterable symbols
-					while trans and not trans[0].islower() and not trans[0].isdigit():
-						trans = trans[1:]
-					self.songname_trans[fn] = trans
-
-		# self.available_songs = sorted(files_grabbed, key = lambda f: str.lower(os.path.basename(f)))
-		self.available_songs = sorted(self.songname_trans, key = self.songname_trans.get)
-
-	def get_all_assoc_files(self, song_path):
-		basename = os.path.basename(song_path)
-		basestem = os.path.splitext(basename)
-		return [self.download_path + basename,
-				self.download_path + basestem[0] + '.cdg',
-				self.download_path + 'nonvocal/' + basename + '.m4a',
-				self.download_path + 'nonvocal/.' + basename + '.m4a',
-				self.download_path + 'vocal/' + basename + '.m4a',
-				self.download_path + 'vocal/.' + basename + '.m4a',
-				self.download_path + 'subs/' + basestem[0] + '.srt']
-
-	def delete_if_exist(self, filename):
-		if os.path.isfile(filename):
-			try:
-				os.remove(filename)
-			except:
-				pass
-
-	def delete(self, song_path):
-		logging.info("Deleting song: " + song_path)
-
-		# delete all associated cdg/vocal/nonvocal files if exist
-		for fn in self.get_all_assoc_files(song_path):
-			self.delete_if_exist(fn)
-
-		self.get_available_songs()
-
-	def rename_if_exist(self, old_path, new_path):
-		if os.path.isfile(old_path):
-			try:
-				shutil.move(old_path, new_path)
-			except:
-				pass
-
-	def rename(self, song_path, new_basestem):
-		logging.info("Renaming song: '" + song_path + "' to: " + new_basestem)
-		ext = os.path.splitext(song_path)
-		if len(ext) < 2:
-			ext += ['']
-		new_basename = new_basestem + ext[1]
-
-		# can handle the case while the file is being processed by vocal splitter, it has been renamed multiple times
-		old_basename = os.path.basename(song_path)
-		self.rename_history[old_basename] = new_basename
-		for k, v in self.rename_history.items():
-			if v == old_basename:
-				self.rename_history[k] = new_basename
-
-		# rename all associated cdg/vocal/nonvocal files if exist
-		for src, tgt in zip(self.get_all_assoc_files(song_path), self.get_all_assoc_files(new_basename)):
-			self.rename_if_exist(src, tgt)
-
-		# rename queue entry if inside queue
-		for item in self.queue:
-			if item['file'] == song_path:
-				item['file'] = self.download_path + new_basename
-				item['title'] = self.filename_from_path(item['file'])
-				break
-
-		# migrate saved delays to new filename
-		if self.save_delays and old_basename in self.delays:
-			self.delays[new_basename] = self.delays.pop(old_basename)
-			self.delays_dirty = True
-			self.auto_save_delays()
-
-		self.get_available_songs()
-
-	def filename_from_path(self, file_path):
-		rc = os.path.basename(file_path)
-		rc = os.path.splitext(rc)[0]
-		rc = rc.split("---")[0]  # removes youtube id if present
-		return rc
 
 	def kill_player(self):
 		if self.use_vlc:
@@ -749,95 +464,6 @@ class Karaoke:
 		elif self.now_playing_filename:
 			self.now_playing = self.now_playing_filename = None
 		return False
-
-	def is_song_in_queue(self, song_path):
-		return song_path in map(lambda t: t['file'], self.queue)
-
-	def enqueue(self, song_path, user = "Pikaraoke"):
-		if (self.is_song_in_queue(song_path)):
-			logging.warn("Song is already in queue, will not add: " + song_path)
-			return False
-		else:
-			logging.info("'%s' is adding song to queue: %s" % (user, song_path))
-			self.queue.append({"user": user, "file": song_path, "title": self.filename_from_path(song_path)})
-			self.update_queue()
-			return True
-
-	def queue_add_random(self, amount):
-		logging.info("Adding %d random songs to queue" % amount)
-		songs = list(self.available_songs)  # make a copy
-		if len(songs) == 0:
-			logging.warn("No available songs!")
-			return False
-		i = 0
-		while i < amount:
-			r = random.randint(0, len(songs) - 1)
-			if self.is_song_in_queue(songs[r]):
-				logging.warn("Song already in queue, trying another... " + songs[r])
-			else:
-				self.queue.append({"user": "Random", "file": songs[r], "title": self.filename_from_path(songs[r])})
-				i += 1
-			songs.pop(r)
-			if len(songs) == 0:
-				self.update_queue()
-				logging.warn("Ran out of songs!")
-				return False
-		self.update_queue()
-		return True
-
-	def update_queue(self):
-		self.queue_json = json.dumps(self.queue)
-		self.status_dirty = True
-
-	def queue_clear(self):
-		logging.info("Clearing queue!")
-		self.queue = []
-		self.update_queue()
-
-	def queue_edit(self, song_file, action, **kwargs):
-		if action == "move":
-			try:
-				src, tgt, size = [int(kwargs[n]) for n in ['src', 'tgt', 'size']]
-				if size > len(self.queue):
-					# new songs have started while dragging the list
-					diff = size - len(self.queue)
-					src -= diff
-					tgt -= diff
-				song = self.queue.pop(src)
-				self.queue.insert(tgt, song)
-			except:
-				logging.error("Invalid move song request: " + str(kwargs))
-				return False
-		else:
-			match = [(ii,each) for ii,each in enumerate(self.queue) if song_file in each["file"]]
-			index, song = match[0] if match else (-1, None)
-			if song == None:
-				logging.error("Song not found in queue: " + song["file"])
-				return False
-			if action == "up":
-				if index < 1:
-					logging.warn("Song is up next, can't bump up in queue: " + song["file"])
-					return False
-				else:
-					logging.info("Bumping song up in queue: " + song["file"])
-					del self.queue[index]
-					self.queue.insert(index - 1, song)
-			elif action == "down":
-				if index == len(self.queue) - 1:
-					logging.warn("Song is already last, can't bump down in queue: " + song["file"])
-					return False
-				else:
-					logging.info("Bumping song down in queue: " + song["file"])
-					del self.queue[index]
-					self.queue.insert(index + 1, song)
-			elif action == "delete":
-				logging.info("Deleting song from queue: " + song["file"])
-				del self.queue[index]
-			else:
-				logging.error("Unrecognized direction: " + action)
-				return False
-		self.update_queue()
-		return True
 
 	def skip(self):
 		if self.is_file_playing():
@@ -1072,6 +698,63 @@ class Karaoke:
 		self.last_vocal_time = tm
 		return mask
 
+	def get_mp3_volume(self, filename):
+		try:
+			basename = os.path.basename(filename)
+			md5, fsize = md5sum(filename), os.stat(filename).st_size
+			# Check cache in delays dict
+			vol_data = self.delays.get(basename, {}).get('volume', {})
+			if vol_data and fsize == vol_data.get('size') and md5 == vol_data.get('md5'):
+				return vol_data['val']
+			# Measure EBU R128 integrated loudness using ebur128 filter
+			output = subprocess.check_output(
+				['ffmpeg', '-i', filename, '-vn', '-af', 'ebur128=peak=true', '-f', 'null', '-'],
+				stderr=subprocess.STDOUT
+			).decode('utf-8', errors='ignore')
+			# Parse integrated loudness from Summary section
+			# Format (multi-line):
+			#   Integrated loudness:
+			#     I:         -12.3 LUFS
+			i_match = re.search(r'Integrated loudness:\s*\n\s*I:\s*([-+]?\d+\.?\d*)\s*LUFS', output)
+			if i_match:
+				integrated_loudness = float(i_match.group(1))
+			else:
+				logging.warning(f"Could not parse integrated loudness for {filename}, using default")
+				integrated_loudness = TARGET_LOUDNESS_LUFS
+			# Calculate volume multiplier to reach target loudness
+			gain_db = TARGET_LOUDNESS_LUFS - integrated_loudness
+			volume_val = np.clip(10 ** (gain_db / 20), 1/16, 16)
+			# Store in delays dict
+			if basename not in self.delays:
+				self.delays[basename] = {}
+			self.delays[basename]['volume'] = {'val': volume_val, 'size': fsize, 'md5': md5, 'lufs': integrated_loudness}
+			self.delays_dirty = True
+			self.auto_save_delays()
+			return volume_val
+		except:
+			logging.warning(f"Could not analyse volume for {filename}, skipping normalisation for this song")
+			return 1
+
+	def update_logical_vol(self):
+		if hasattr(self, 'media_vol'):
+			self.logical_volume = self.volume * self.media_vol
+
+	def enable_vol_norm(self, enable):
+		self.normalize_vol = enable
+		if enable and shutil.which('ffmpeg') is None:
+			self.normalize_vol = enable = False
+		if enable and self.now_playing_filename:
+			self.volume = self.vlcclient.get_info_xml()['volume']
+			self.media_vol = self.get_mp3_volume(self.now_playing_filename)
+			self.update_logical_vol()
+		self.save_config()
+		return str(self.logical_volume)
+
+	def set_dnn_vocal(self, enabled):
+		self.use_DNN_vocal = enabled
+		self.save_config()
+		self.play_vocal()
+
 	def get_state(self):
 		if self.use_vlc and self.vlcclient.is_transposing:
 			return defaultdict(lambda: None, self.player_state)
@@ -1103,11 +786,11 @@ class Karaoke:
 	def handle_run_loop(self):
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT:
-				logging.warn("Window closed: Exiting pikaraoke...")
+				logging.warning("Window closed: Exiting pikaraoke...")
 				self.running = False
 			elif event.type == pygame.KEYDOWN:
 				if event.key == pygame.K_ESCAPE:
-					logging.warn("ESC pressed: Exiting pikaraoke...")
+					logging.warning("ESC pressed: Exiting pikaraoke...")
 					self.running = False
 				if event.key == pygame.K_f:
 					self.toggle_full_screen()
@@ -1181,185 +864,6 @@ class Karaoke:
 		elif self.platform != 'windows':
 			os.system(f"tmux send-keys -t PiKaraoke:0.4 C-c")
 
-	def get_mp3_volume(self, filename):
-		try:
-			basename = os.path.basename(filename)
-			md5, fsize = md5sum(filename), os.stat(filename).st_size
-			# Check cache in delays dict
-			vol_data = self.delays.get(basename, {}).get('volume', {})
-			if vol_data and fsize == vol_data.get('size') and md5 == vol_data.get('md5'):
-				return vol_data['val']
-			# Measure EBU R128 integrated loudness using ebur128 filter
-			output = subprocess.check_output(
-				['ffmpeg', '-i', filename, '-vn', '-af', 'ebur128=peak=true', '-f', 'null', '-'],
-				stderr=subprocess.STDOUT
-			).decode('utf-8', errors='ignore')
-			# Parse integrated loudness from Summary section
-			# Format (multi-line):
-			#   Integrated loudness:
-			#     I:         -12.3 LUFS
-			i_match = re.search(r'Integrated loudness:\s*\n\s*I:\s*([-+]?\d+\.?\d*)\s*LUFS', output)
-			if i_match:
-				integrated_loudness = float(i_match.group(1))
-			else:
-				logging.warning(f"Could not parse integrated loudness for {filename}, using default")
-				integrated_loudness = TARGET_LOUDNESS_LUFS
-			# Calculate volume multiplier to reach target loudness
-			gain_db = TARGET_LOUDNESS_LUFS - integrated_loudness
-			volume_val = np.clip(10 ** (gain_db / 20), 1/16, 16)
-			# Store in delays dict
-			if basename not in self.delays:
-				self.delays[basename] = {}
-			self.delays[basename]['volume'] = {'val': volume_val, 'size': fsize, 'md5': md5, 'lufs': integrated_loudness}
-			self.delays_dirty = True
-			self.auto_save_delays()
-			return volume_val
-		except:
-			logging.warning(f"Could not analyse volume for {filename}, skipping normalisation for this song")
-			return 1
-
-	def update_logical_vol(self):
-		if hasattr(self, 'media_vol'):
-			self.logical_volume = self.volume * self.media_vol
-
-	def enable_vol_norm(self, enable):
-		self.normalize_vol = enable
-		if enable and shutil.which('ffmpeg') is None:
-			self.normalize_vol = enable = False
-		if enable and self.now_playing_filename:
-			self.volume = self.vlcclient.get_info_xml()['volume']
-			self.media_vol = self.get_mp3_volume(self.now_playing_filename)
-			self.update_logical_vol()
-		self.save_config()
-		return str(self.logical_volume)
-
-	def set_dnn_vocal(self, enabled):
-		self.use_DNN_vocal = enabled
-		self.save_config()
-		self.play_vocal()
-
-	# Config file — plain INI format, safe to hand-edit while the app is not running.
-	# Lives in the project folder (alongside app.py) rather than the song folder.
-	CONFIG_TEMPLATE = """\
-# pikaraoke settings
-# This file is written automatically by the web UI.
-# You can also edit it by hand while the app is not running.
-
-[pikaraoke]
-
-# Save per-song play settings (audio delay, subtitle delay, subtitle on/off).
-# Settings are stored alongside the song library.
-save_play_settings = {save_play_settings}
-
-# Default subtitle delay in seconds (negative = subtitles appear earlier).
-# This is the baseline delay used when no per-song delay is saved.
-default_subtitle_delay = {default_subtitle_delay}
-
-# Normalize volume levels across songs so loud and quiet songs play at similar levels.
-# Requires ffmpeg to be installed.
-normalize_vol = {normalize_vol}
-
-# Use the DNN (neural network) model for vocal separation.
-# Produces better quality results and uses the GPU if available.
-# Set to false to use the faster stereo subtraction method instead.
-use_dnn_vocal = {use_dnn_vocal}
-
-# Display language code (e.g., en_US, ja_JP). Leave empty for system default.
-language = {language}
-
-# Administrator password for restricting certain web UI features. Leave empty for no password.
-admin_password = {admin_password}
-
-# Show overlay with QR code and IP address on top of video.
-show_overlay = {show_overlay}
-"""
-
-	def load_config(self):
-		self.config_path = os.path.join(self.base_path, 'pikaraoke.cfg')
-		if not os.path.isfile(self.config_path):
-			logging.info(f"No config file found, creating defaults at {self.config_path}")
-			self.save_config()
-		config = configparser.ConfigParser()
-		config.read(self.config_path)
-		if 'pikaraoke' in config:
-			s = config['pikaraoke']
-			# UI settings (in order of appearance)
-			try:
-				self.save_play_settings = s.getboolean('save_play_settings', fallback=self.CONFIG_DEFAULTS['save_play_settings'])
-			except ValueError:
-				logging.warning(f"Invalid save_play_settings value, using default: {self.CONFIG_DEFAULTS['save_play_settings']}")
-				self.save_play_settings = self.CONFIG_DEFAULTS['save_play_settings']
-			try:
-				self.default_subtitle_delay = s.getfloat('default_subtitle_delay', fallback=self.CONFIG_DEFAULTS['default_subtitle_delay'])
-			except ValueError:
-				logging.warning(f"Invalid default_subtitle_delay value, using default: {self.CONFIG_DEFAULTS['default_subtitle_delay']}")
-				self.default_subtitle_delay = self.CONFIG_DEFAULTS['default_subtitle_delay']
-			try:
-				self.normalize_vol = s.getboolean('normalize_vol', fallback=self.CONFIG_DEFAULTS['normalize_vol'])
-			except ValueError:
-				logging.warning(f"Invalid normalize_vol value, using default: {self.CONFIG_DEFAULTS['normalize_vol']}")
-				self.normalize_vol = self.CONFIG_DEFAULTS['normalize_vol']
-			try:
-				self.use_DNN_vocal = s.getboolean('use_dnn_vocal', fallback=self.CONFIG_DEFAULTS['use_dnn_vocal'])
-			except ValueError:
-				logging.warning(f"Invalid use_dnn_vocal value, using default: {self.CONFIG_DEFAULTS['use_dnn_vocal']}")
-				self.use_DNN_vocal = self.CONFIG_DEFAULTS['use_dnn_vocal']
-			# String settings
-			self.language = s.get('language', fallback=self.CONFIG_DEFAULTS['language'])
-			# Config-file only settings
-			self.admin_password = s.get('admin_password', fallback=self.CONFIG_DEFAULTS['admin_password'])
-			try:
-				self.show_overlay = s.getboolean('show_overlay', fallback=self.CONFIG_DEFAULTS['show_overlay'])
-			except ValueError:
-				logging.warning(f"Invalid show_overlay value, using default: {self.CONFIG_DEFAULTS['show_overlay']}")
-				self.show_overlay = self.CONFIG_DEFAULTS['show_overlay']
-		self.set_save_delays(self.save_play_settings)
-		logging.info(f"Config loaded from {self.config_path}")
-
-	def save_config(self):
-		try:
-			with open(self.config_path, 'w') as f:
-				f.write(self.CONFIG_TEMPLATE.format(
-					save_play_settings=str(self.save_play_settings).lower(),
-					default_subtitle_delay=self.default_subtitle_delay,
-					normalize_vol=str(self.normalize_vol).lower(),
-					use_dnn_vocal=str(self.use_DNN_vocal).lower(),
-					language=self.language,
-					admin_password=self.admin_password,
-					show_overlay=str(self.show_overlay).lower(),
-				))
-			logging.info(f"Config saved to {self.config_path}")
-		except Exception as e:
-			logging.error(f"Failed to save config: {e}")
-
-	def init_save_delays(self):
-		self.delays_dirty = False
-		if os.path.isfile(self.save_delays):
-			try:
-				self.delays = json.load(open(self.save_delays))
-				return
-			except:
-				logging.warning(f"Could not read delays file {self.save_delays}, starting with empty delays")
-		self.delays = {}
-		with open(self.save_delays, 'w') as fp:
-			json.dump(self.delays, fp, indent=1)
-
-	def set_save_delays(self, state):
-		if state != bool(self.save_delays):
-			if state:
-				self.save_delays = self.dft_delays_file
-				self.init_save_delays()
-			else:
-				self.save_delays = None
-		self.save_play_settings = state
-		self.save_config()
-
-	def auto_save_delays(self):
-		if self.save_delays and self.delays_dirty:
-			self.delays_dirty = False
-			with open(self.save_delays, 'w') as fp:
-				json.dump(self.delays, fp, indent=1)
-
 	def run(self):
 		logging.info("Starting PiKaraoke!")
 		self.running = True
@@ -1392,7 +896,7 @@ show_overlay = {show_overlay}
 						self.update_queue()
 				self.handle_run_loop()
 			except KeyboardInterrupt:
-				logging.warn("Keyboard interrupt: Exiting pikaraoke...")
+				logging.warning("Keyboard interrupt: Exiting pikaraoke...")
 				self.running = False
 
 		# Clean up before quit

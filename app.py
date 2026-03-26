@@ -17,6 +17,8 @@ from constants import VERSION
 from collections import defaultdict
 from lib.get_platform import *
 from lib.vlcclient import get_default_vlc_path
+from lib.notifications import ip2websock, ip2pane
+from lib.asr import register_asr_routes
 
 try:
 	from urllib.parse import quote, unquote
@@ -95,7 +97,7 @@ def status_thread():
 				ws.send(f"update('{K.queue_json}')")
 		K.status_dirty = False
 
-# Define global symbols for Jinja templates 
+# Define global symbols for Jinja templates
 @app.context_processor
 def inject_stage_and_region():
 	return {'getString': getString, 'getString1': getString}
@@ -111,17 +113,6 @@ def preprocessor():
 			if client_lang is not None:
 				break
 	request.client_lang = find_language(client_lang or os.lang)
-
-
-def filename_from_path(file_path, remove_youtube_id = True):
-	rc = os.path.basename(file_path)
-	rc = os.path.splitext(rc)[0]
-	if remove_youtube_id:
-		try:
-			rc = rc.split("---")[0]  # removes youtube id if present
-		except TypeError:
-			rc = rc.split("---".encode("utf-8"))[0]
-	return rc
 
 
 def url_escape(filename):
@@ -381,7 +372,7 @@ def enqueue():
 	song = d['song' if 'song' in d else 'song-to-add']
 	user = d['user' if 'user' in d else 'song-added-by']
 	rc = K.enqueue(song, user)
-	song_title = filename_from_path(song)
+	song_title = K.filename_from_path(song)
 	return json.dumps({"song": song_title, "success": rc})
 
 
@@ -740,108 +731,42 @@ def splash():
 		url=request.url_root
 	)
 
-@app.route("/info")
-def info():
-	url = K.url
-
-	# cpu
+def get_system_stats():
 	cpu = str(psutil.cpu_percent()) + "%"
 
-	# mem
 	memory = psutil.virtual_memory()
 	available = round(memory.available / 1024.0 / 1024.0, 1)
 	total = round(memory.total / 1024.0 / 1024.0, 1)
 	memory = str(available) + "MB free / " + str(total) + "MB total ( " + str(memory.percent) + "% )"
 
-	# disk
 	disk = psutil.disk_usage("/")
-	# Divide from Bytes -> KB -> MB -> GB
 	free = round(disk.free / 1024.0 / 1024.0 / 1024.0, 1)
 	total = round(disk.total / 1024.0 / 1024.0 / 1024.0, 1)
 	disk = str(free) + "GB free / " + str(total) + "GB total ( " + str(disk.percent) + "% )"
 
-	# whether screencapture.sh and vocal_splitter.py is running
-	get_status = lambda t: getString2(27) if t is None else (getString2(28) if t else getString2(29))
-	screencapture = K.streamer_alive()
-	vocalsplitter = K.vocal_alive()
-	vocal_extra = ''
-	if vocalsplitter:
-		vocal_extra = getString2(30) if K.vocal_device == 'cpu' else getString2(31)
-
-	# youtube-dl
-	youtubedl_version = K.youtubedl_version
-
-	is_pi = get_platform() == "raspberry_pi"
-
-	return render_template(
-		"info.html",
-		getString1 = getString2,
-		langs = os.langs, lang = os.lang,
-		ostype = sys.platform.upper(),
-		url = url,
-		memory = memory,
-		cpu = cpu,
-		disk = disk,
-		youtubedl_version = youtubedl_version,
-		is_pi = is_pi,
-		use_DNN = K.use_DNN_vocal,
-		norm_vol = K.normalize_vol,
-		pikaraoke_version = VERSION,
-		download_path = K.download_path,
-		num_of_songs = len(K.available_songs),
-		screencapture = get_status(screencapture),
-		vocalsplitter = get_status(vocalsplitter) + vocal_extra,
-		platform = K.platform,
-		save_delays = bool(K.save_delays),
-		default_subtitle_delay = K.default_subtitle_delay,
-		admin = is_admin(),
-		admin_enabled = admin_password != None
-	)
+	return cpu, memory, disk
 
 @app.route("/f_info")
 def f_info():
-	url = K.url
-
-	# cpu
-	cpu = str(psutil.cpu_percent()) + "%"
-
-	# mem
-	memory = psutil.virtual_memory()
-	available = round(memory.available / 1024.0 / 1024.0, 1)
-	total = round(memory.total / 1024.0 / 1024.0, 1)
-	memory = str(available) + "MB free / " + str(total) + "MB total ( " + str(memory.percent) + "% )"
-
-	# disk
-	disk = psutil.disk_usage("/")
-	# Divide from Bytes -> KB -> MB -> GB
-	free = round(disk.free / 1024.0 / 1024.0 / 1024.0, 1)
-	total = round(disk.total / 1024.0 / 1024.0 / 1024.0, 1)
-	disk = str(free) + "GB free / " + str(total) + "GB total ( " + str(disk.percent) + "% )"
-
-	# whether screencapture.sh and vocal_splitter.py is running
+	cpu, memory, disk = get_system_stats()
 	get_status = lambda t: getString2(27) if t is None else (getString2(28) if t else getString2(29))
 	screencapture = K.streamer_alive()
 	vocalsplitter = K.vocal_alive()
 	vocal_extra = ''
 	if vocalsplitter:
 		vocal_extra = getString2(30) if K.vocal_device == 'cpu' else getString2(31)
-
-	# youtube-dl
-	youtubedl_version = K.youtubedl_version
-
-	is_pi = get_platform() == "raspberry_pi"
 
 	return render_template(
 		"f_info.html",
 		getString1 = getString2,
 		langs = os.langs, lang = os.lang,
 		ostype = sys.platform.upper(),
-		url = url,
+		url = K.url,
 		memory = memory,
 		cpu = cpu,
 		disk = disk,
-		youtubedl_version = youtubedl_version,
-		is_pi = is_pi,
+		youtubedl_version = K.youtubedl_version,
+		is_pi = get_platform() == "raspberry_pi",
 		use_DNN = K.use_DNN_vocal,
 		norm_vol = K.normalize_vol,
 		pikaraoke_version = VERSION,
@@ -855,48 +780,6 @@ def f_info():
 		admin = is_admin(),
 		admin_enabled = admin_password != None
 	)
-
-def run_asr():
-	global args
-	with open(f'{K.tmp_dir}/rec.webm', 'rb') as f:
-		r = requests.post(args.cloud+'/run_asr/base', files={'file': f}, timeout=8)
-	asr_output = json.loads(r.text) if r.status_code==200 else {}
-	return asr_output
-
-def _add_spoken(client_ip, user, getString):
-	asr_output = run_asr()
-
-	print(f'ASR result: {asr_output}', file=sys.stderr)
-	if asr_output=={} or type(asr_output)==str:
-		return logging.error(f'Cloud ASR returns HTTP status code = {r.status_code} ()')
-	elif not asr_output['text']:
-		return logging.error(f'ASR output is empty')
-
-	res = findMedia(K.download_path, asr_postprocess(asr_output['text']), lang=asr_output['language'])
-	ws = ip2websock.get(client_ip, '')
-	if not res:
-		return ws.send(f"showNotification('{getString(226)%asr_output['text']}', 'is-info')")
-	res_titles = [filename_from_path(s) for s in res]
-	if len(res)==1:
-		add_res = K.enqueue(res[0], user)
-		return ws.send(f'add1song("{res_titles[0]}","{res[0]}")' if add_res else f"showNotification('{getString(116)+res_titles[0]}', 'is-info')")
-	return ws.send(f"addSongs('{json.dumps([res_titles, res])}')")
-
-
-@app.route('/add_spoken/<user>', methods=['POST'])
-def add_spoken(user):
-	with open(f'{K.tmp_dir}/rec.webm', 'wb') as fp:
-		fp.write(request.data)
-	threading.Thread(target=_add_spoken, args=(request.remote_addr, user, getString)).start()
-	return 'OK'
-
-@app.route('/get_ASR', methods=['POST'])
-@app.route('/get_ASR/<path:cmd>', methods=['POST'])
-def get_ASR(cmd=''):
-	with open(f'{K.tmp_dir}/rec.webm', 'wb') as fp:
-		fp.write(request.data)
-	asr_output = run_asr()
-	return asr_output['text']
 
 
 # Delay system commands to allow redirect to render first
@@ -947,7 +830,7 @@ def quit():
 		flash(getString(35), "is-warning")
 		threading.Thread(target = delayed_halt, args = [0]).start()
 	else:
-		flash(getString(36), "is-danger") 
+		flash(getString(36), "is-danger")
 	return ''
 
 
@@ -1170,7 +1053,6 @@ if __name__ == "__main__":
 	)
 	args = parser.parse_args()
 
-	app.jinja_env.globals.update(filename_from_path = filename_from_path)
 	app.jinja_env.globals.update(url_escape = quote)
 
 	args.tmp_dir = os.path.expanduser(args.temp or get_default_tmp_dir())
@@ -1225,9 +1107,15 @@ if __name__ == "__main__":
 	# Configure karaoke process
 	os.K = K = Karaoke(args)
 
+	# Make K.filename_from_path available to Jinja templates
+	app.jinja_env.globals.update(filename_from_path = K.filename_from_path)
+
 	# Set language from config (use system locale if empty)
 	set_language(K.language or locale.getdefaultlocale()[0])
 	admin_password = K.admin_password or None
+
+	# Register ASR routes now that K and args are set
+	register_asr_routes(app, lambda: K, lambda: args, getString)
 
 	if not args.ssl:
 		threading.Thread(target=lambda:app.run(host='0.0.0.0', port=args.port+1, threaded = True, ssl_context=('cert.pem', 'key.pem'))).start()
